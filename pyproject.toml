@@ -1,0 +1,48 @@
+[project]
+name = "dcmspec-explorer"
+version = "0.1.0"
+description = "PySide6-based GUI application for exploring DICOM specifications"
+authors = [
+    {name = "David Wikler",email = "david.wikler@ulb.ac.be"}
+]
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "pyside6 (>=6.9.1,<7.0.0)",
+    "dcmspec @ git+https://github.com/dwikler/dcmspec.git",
+]
+
+[tool.poetry]
+packages = [{include = "dcmspec_explorer", from = "src"}]
+
+[tool.poetry.scripts]
+compile-ui = "scripts.compile_ui:main"
+dcmspec-explorer = "dcmspec_explorer.main:main"
+
+
+[tool.poetry.group.dev.dependencies]
+pre-commit = "^4.3.0"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 120
+exclude = [
+    "src/dcmspec_explorer/view/*_ui.py"
+]
+
+[tool.ruff.lint]
+# E includes line-too-long (E501), D includes docstrings checks
+select = ["E", "F", "D"]
+# ignore rules conflicting with other, keeping D211 and D212
+# D203: Requires a blank line before class docstring.
+# D211: Disallows a blank line before class docstring.
+# D212: Requires the summary line of a multi-line docstring to be on the first line.
+# D213: Requires the summary line to be on the second line.
+ignore = ["D203", "D213"]  
+
+[tool.ruff.lint.per-file-ignores]
+# Ignore `D104` (Missing docstring in public package) in all `__init__.py` files.
+"__init__.py" = ["D104"]

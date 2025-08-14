@@ -1,0 +1,19 @@
+repos:
+  - repo: local
+    hooks:
+      - id: compile-ui
+        name: Compile Qt .ui files before commit
+        entry: poetry run compile-ui
+        language: system
+        types: [python]
+        files: \.ui$
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.12.8 # Use the latest stable version
+    hooks:
+      # Run the linter.
+      - id: ruff-check
+        args: [--fix, --line-length=120]
+        # Run the formatter.
+      - id: ruff-format
+        args: [--line-length=120]
