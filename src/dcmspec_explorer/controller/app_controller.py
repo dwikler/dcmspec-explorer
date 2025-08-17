@@ -119,13 +119,12 @@ class AppController(QObject):
         model = QStandardItemModel()
         model.setHorizontalHeaderLabels(["Name", "Kind", "", "♥"])
 
+        is_favorite = ""
         for title, table_id, href, iod_type in iod_list:
             title_item = QStandardItem(title)
             kind_item = QStandardItem(iod_type)
             usage_item = QStandardItem("")  # Usage column is empty for now
-            # heart_icon = "♥" if favorites_manager.is_favorite(table_id) else ""
-            heart_icon = ""
-            favorite_item = QStandardItem(heart_icon)
+            favorite_item = QStandardItem(is_favorite)
 
             # Store table_id and iod_type as data for later retrieval
             title_item.setData(table_id, role=Qt.UserRole)
