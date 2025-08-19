@@ -36,6 +36,18 @@ html5lib = ["html5lib"]
 lxml = ["lxml"]
 
 [[package]]
+name = "blinker"
+version = "1.9.0"
+description = "Fast, simple object-to-object and broadcast signaling"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "blinker-1.9.0-py3-none-any.whl", hash = "sha256:ba0efaa9080b619ff2f3459d1d500c57bddea4a6b424b60a91141db6fd2f08bc"},
+    {file = "blinker-1.9.0.tar.gz", hash = "sha256:b4ce2265a7abece45e7cc896e98dbebe6cead56bcf805a3d23136d145f5445bf"},
+]
+
+[[package]]
 name = "bs4"
 version = "0.0.2"
 description = "Dummy package for Beautiful Soup (beautifulsoup4)"
@@ -753,4 +765,4 @@ test = ["covdefaults (>=2.3)", "coverage (>=7.2.7)", "coverage-enable-subprocess
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "46b9778b61fed90e901964c08b7e415f2fbc12dd25b63772e32c9453feb3b037"
+content-hash = "de28d4dfbfcd6ba3ffb5106d05c8bcc8ab4b4524c01eff53b8e2f2ff62d9d94c"

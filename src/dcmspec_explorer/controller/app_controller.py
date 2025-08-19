@@ -2,13 +2,13 @@
 
 import threading
 
-from PySide6.QtCore import Qt, QTimer, QObject, QThread
+from PySide6.QtCore import Qt, QTimer, QObject
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 
 from dcmspec_explorer.app_config import load_app_config, setup_logger
 from dcmspec_explorer.model.model import Model
+from dcmspec_explorer.services.service_mediator import IODListLoaderServiceMediator
 from dcmspec_explorer.view.main_window import MainWindow
-from dcmspec_explorer.services.iod_loading_service import IODListLoaderWorker
 
 
 class AppController(QObject):
@@ -26,7 +26,7 @@ class AppController(QObject):
     flow.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the application controller.
 
         Create the model and main window instances, and prepare to connect them.
@@ -57,55 +57,57 @@ class AppController(QObject):
         self.model = Model(self.config, self.logger)
         self.view = MainWindow()
 
+        # Initialize the service mediator
+        self.service = IODListLoaderServiceMediator(self.model, self.logger, parent=self)
+
         # Use QTimer to ensure the treeview is only initialized after the window is shown
         QTimer.singleShot(0, self.initialize_treeview)
 
-    def initialize_treeview(self):
-        """Initialize the treeview with list of IODs using QThread and signals.
+    def initialize_treeview(self) -> None:
+        """Initialize the treeview with list of IODs.
 
-        Shows a progress loading message while data is being loaded.
+        Using a background thread and blinker signals to show a progress loading message while data is being loaded.
         """
-        self.view.update_status_bar("Loading IOD modules...")
+        self.view.update_status_bar(message="Loading IOD modules...")
 
-        # Set up the worker and thread
-        self._treeview_thread = QThread()
-        self._treeview_worker = IODListLoaderWorker(self.model, logger=self.logger)
-        self._treeview_worker.moveToThread(self._treeview_thread)
+        # Start the worker in a background thread via the service mediator
+        self._treeview_worker, self._treeview_thread = self.service.start_iodlist_worker()
 
-        # Connect signals
-        self._treeview_thread.started.connect(self._treeview_worker.run)
-        self._treeview_worker.finished.connect(self._on_treeview_loaded)
-        self._treeview_worker.error.connect(self._on_treeview_error)
-        self._treeview_worker.finished.connect(self._treeview_thread.quit)
-        self._treeview_worker.finished.connect(self._treeview_worker.deleteLater)
-        self._treeview_thread.finished.connect(self._treeview_thread.deleteLater)
-        self._treeview_worker.error.connect(self._treeview_thread.quit)
-        self._treeview_worker.error.connect(self._treeview_worker.deleteLater)
-        self._treeview_worker.progress.connect(self._on_treeview_progress)
+        # Connect service mediator's Qt signals to UI update methods.
+        # By specifying Qt.QueuedConnection, we ensure that if a signal is emitted from any thread,
+        # the connected slot (UI update method) will be executed in the thread that owns the receiver object.
+        # In this case, both the ServiceMediator and AppController live in the main thread, so UI updates
+        # are performed in the main thread, ensuring thread safety for all Qt UI operations.
+        self.service.iodlist_progress_signal.connect(self._update_iodlist_progress_ui, Qt.QueuedConnection)
+        self.service.iodlist_loaded_signal.connect(self._update_iodlist_loaded_ui, Qt.QueuedConnection)
+        self.service.iodlist_error_signal.connect(self._update_iodlist_error_ui, Qt.QueuedConnection)
 
-        # Start the thread
-        self._treeview_thread.start()
-
-    def _on_treeview_progress(self, percent):
+    def _update_iodlist_progress_ui(self, sender: object, percent: int) -> None:
+        self.logger.debug(f"Progress signal received from {sender}: percent={percent}")
         if percent == -1:
-            self.view.update_status_bar("Loading IOD modules... (unknown progress)")
+            self.logger.debug("Unknown progress received (-1).")
+            self.view.update_status_bar(message="Loading IOD modules... (unknown progress)")
         elif percent % 10 == 0 or percent == 100:
+            self.logger.debug(f"Progress update: {percent}%")
             self.view.update_status_bar(f"Loading IOD modules... {percent}%")
 
-    def _on_treeview_loaded(self, iod_modules):
+    def _update_iodlist_loaded_ui(self, sender: object, iod_modules: object) -> None:
         qt_tree_model = self._build_qt_tree_model(iod_modules)
         self.view.update_treeview(qt_tree_model)
-        self.view.update_status_bar(f"Loaded {len(iod_modules)} IOD modules.")
+        self.view.update_status_bar(message=f"Loaded {len(iod_modules)} IOD modules.")
 
-    def _on_treeview_error(self, message):
+    def _update_iodlist_error_ui(self, sender: object, message: str) -> None:
+        self.logger.error(f"Error signal received from {sender}: {message}")
         self.view.show_error(message)
-        self.view.update_status_bar("Error loading IOD modules.")
+        self.view.update_status_bar(message="Error loading IOD modules.")
 
-    def run(self):
+    def run(self) -> None:
         """Show the main application window and start the user interface."""
         self.view.show()
 
-    def _build_qt_tree_model(self, iod_list, favorites_manager=None):
+    def _build_qt_tree_model(
+        self, iod_list: list[tuple[str, str, str, str]], favorites_manager: object = None
+    ) -> QStandardItemModel:
         """Convert a list of IOD module tuples into a QStandardItemModel for use with a QTreeView.
 
         Args:
