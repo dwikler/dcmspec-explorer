@@ -86,7 +86,6 @@ class AppController(QObject):
 
     def _update_iodlist_progress_ui(self, sender: object, progress: Progress) -> None:
         percent = progress.percent
-        self.logger.debug(f"Progress signal received from {sender}: percent={percent}")
         if percent == -1:
             self.logger.debug("Unknown progress received (-1).")
             self.view.update_status_bar(message="Loading IOD modules... (unknown progress)")

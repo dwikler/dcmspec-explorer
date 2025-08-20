@@ -1,9 +1,10 @@
 """Mediator between service layer and controller of DCM Spec Explorer."""
 
+import queue
 from typing import Any, Optional, Tuple
 import threading
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, QTimer
 
 from dcmspec.progress import Progress
 
@@ -64,11 +65,6 @@ class IODListLoaderServiceMediator(BaseServiceMediator):
         """
         super().__init__(model, logger, parent)
 
-        # Connect blinker signals to Qt signals
-        IODListLoaderWorker.finished.connect(self._on_iodlist_loaded)
-        IODListLoaderWorker.error.connect(self._on_iodlist_error)
-        IODListLoaderWorker.progress.connect(self._on_iodlist_progress)
-
     def start_iodlist_worker(self) -> Tuple["IODListLoaderWorker", threading.Thread]:
         """Start the IOD list loader worker in a background thread.
 
@@ -76,9 +72,17 @@ class IODListLoaderServiceMediator(BaseServiceMediator):
             tuple: The worker and the thread objects.
 
         """
-        self._worker = IODListLoaderWorker(self.model, logger=self.logger)
+        # Create a thread-safe queue for communication
+        self._event_queue = queue.Queue()
+        self._worker = IODListLoaderWorker(self.model, logger=self.logger, event_queue=self._event_queue)
         self._thread = threading.Thread(target=self._worker.run, daemon=True)
         self._thread.start()
+
+        # Start a QTimer to poll the queue for events
+        self._poll_timer = QTimer(self)
+        self._poll_timer.timeout.connect(self._poll_event_queue)
+        self._poll_timer.start(50)  # Poll every 50ms
+
         return self._worker, self._thread
 
     def _on_iodlist_progress(self, sender: object = None, progress: Progress = None) -> None:
@@ -95,3 +99,18 @@ class IODListLoaderServiceMediator(BaseServiceMediator):
         """Translate blinker error signal to Qt signal."""
         self.iodlist_error_signal.emit(sender, message)
         self.cleanup_worker_thread()
+
+    def _poll_event_queue(self) -> None:
+        """Poll the event queue for worker events and emit Qt signals."""
+        while not self._event_queue.empty():
+            event_type, data = self._event_queue.get()
+            if event_type == "progress":
+                self.iodlist_progress_signal.emit(self, data)
+            elif event_type == "loaded":
+                self.iodlist_loaded_signal.emit(self, data)
+                self.cleanup_worker_thread()
+                self._poll_timer.stop()
+            elif event_type == "error":
+                self.iodlist_error_signal.emit(self, data)
+                self.cleanup_worker_thread()
+                self._poll_timer.stop()
