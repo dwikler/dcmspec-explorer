@@ -55,4 +55,4 @@ class ServiceProgressObserver(ProgressObserver):
 
     def __call__(self, progress: Progress) -> None:
         """Handle progress updates by emitting the blinker Signal."""
-        self.signal.send(progress=progress)
+        self.signal.send(self, progress=progress)

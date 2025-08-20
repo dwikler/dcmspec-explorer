@@ -5,6 +5,8 @@ import threading
 from PySide6.QtCore import Qt, QTimer, QObject
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 
+from dcmspec.progress import Progress
+
 from dcmspec_explorer.app_config import load_app_config, setup_logger
 from dcmspec_explorer.model.model import Model
 from dcmspec_explorer.services.service_mediator import IODListLoaderServiceMediator
@@ -82,7 +84,8 @@ class AppController(QObject):
         self.service.iodlist_loaded_signal.connect(self._update_iodlist_loaded_ui, Qt.QueuedConnection)
         self.service.iodlist_error_signal.connect(self._update_iodlist_error_ui, Qt.QueuedConnection)
 
-    def _update_iodlist_progress_ui(self, sender: object, percent: int) -> None:
+    def _update_iodlist_progress_ui(self, sender: object, progress: Progress) -> None:
+        percent = progress.percent
         self.logger.debug(f"Progress signal received from {sender}: percent={percent}")
         if percent == -1:
             self.logger.debug("Unknown progress received (-1).")

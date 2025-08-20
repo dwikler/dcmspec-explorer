@@ -3,6 +3,8 @@
 import threading
 from blinker import Signal
 
+from dcmspec_explorer.services.progress_observer import ServiceProgressObserver
+
 
 class IODListLoaderWorker:
     """Load IOD list in a background thread."""
@@ -21,21 +23,11 @@ class IODListLoaderWorker:
         # Log thread information
         self.logger.debug(f"TreeviewLoaderWorker created in thread: {threading.current_thread().name}")
 
-        def emit_percent(percent):
-            """Define callback function to receive progress updates.
-
-            This function emits a custom signal with the progress percentage.
-            A nested function is used here because dcmspec checks for types.FunctionType
-            to provide backward-compatibility for callbacks expecting an int.
-            This check allows plain functions, nested functions, and lambdas, but excludes
-            bound methods (like self.emit_percent).
-            By using a nested function, we can access 'self' via closure while still
-            complying with dcmspec's callback requirements.
-            """
-            IODListLoaderWorker.progress.send(self, percent=percent)
+        # Create a progress observer that emits a blinker signal with the Progress object
+        progress_observer = ServiceProgressObserver(IODListLoaderWorker.progress)
 
         try:
-            iod_modules = self.model.load_iod_list(progress_callback=emit_percent)
+            iod_modules = self.model.load_iod_list(progress_observer=progress_observer)
             IODListLoaderWorker.finished.send(self, iod_modules=iod_modules)
         except Exception as e:
             IODListLoaderWorker.error.send(self, message=str(e))

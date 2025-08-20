@@ -22,12 +22,12 @@ class Model:
         # Initialize DOM parser for DICOM standard version extraction
         self.dom_parser = DOMTableSpecParser(logger=self.logger)
 
-    def load_iod_list(self, force_download: bool = False, progress_callback=None):
+    def load_iod_list(self, force_download: bool = False, progress_observer=None):
         """Load list of IODs from the DICOM PS3.3 List of Tables.
 
         Args:
             force_download (bool): If True, force download from URL instead of using cache.
-            progress_callback (callable): A callback function to report progress (0-100).
+            progress_observer (ServiceProgressObserver): A progress observer to report progress.
 
         Returns:
             List[Tuple[str, str, str, str]]: A list of IODs as (iod_name, table_id, href, iod_kind).
@@ -36,35 +36,35 @@ class Model:
         self.logger.debug("Loading IOD list...")
 
         try:
-            # Use XHTMLDocHandler to download and parse the HTML with caching
-            cache_file_name = "ps3.3.html"
-            soup = self.doc_handler.load_document(
-                cache_file_name=cache_file_name,
-                url=self.part3_toc_url,
-                force_download=force_download,
-                progress_callback=progress_callback,
-            )
-
-            # Extract and display DICOM version using the library method
-            self.dicom_version = self.dom_parser.get_version(soup, "")
-            self.logger.info(f"Version {self.dicom_version}")
-
-            # Find the list of tables div
-            list_of_tables = soup.find("div", class_="list-of-tables")
-            if not list_of_tables:
-                error_msg = "Could not find list-of-tables section in downloaded HTML document."
-                self.logger.error(error_msg)
-                raise Exception(error_msg)
-
-            # Extract IOD modules
-            iod_list = self.extract_iod_list(list_of_tables)
-
-            return iod_list
-
+            return self._extracted_from_load_iod_list_(force_download, progress_observer)
         except Exception as e:
             error_msg = f"Failed to load DICOM specification: \n{str(e)}"
             self.logger.error(error_msg)
             raise RuntimeError(error_msg) from e
+
+    # TODO Rename this here and in `load_iod_list`
+    def _extracted_from_load_iod_list_(self, force_download, progress_observer):
+        # Use XHTMLDocHandler to download and parse the HTML with caching
+        cache_file_name = "ps3.3.html"
+        soup = self.doc_handler.load_document(
+            cache_file_name=cache_file_name,
+            url=self.part3_toc_url,
+            force_download=force_download,
+            progress_observer=progress_observer,
+        )
+
+        # Extract and display DICOM version using the library method
+        self.dicom_version = self.dom_parser.get_version(soup, "")
+        self.logger.info(f"Version {self.dicom_version}")
+
+        # Find the list of tables div
+        list_of_tables = soup.find("div", class_="list-of-tables")
+        if not list_of_tables:
+            error_msg = "Could not find list-of-tables section in downloaded HTML document."
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
+
+        return self.extract_iod_list(list_of_tables)
 
     def extract_iod_list(self, list_of_tables) -> List[Tuple[str, str, str, str]]:
         """Extract list of IODs from the list of tables section.

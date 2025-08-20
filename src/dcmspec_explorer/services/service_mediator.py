@@ -5,6 +5,8 @@ import threading
 
 from PySide6.QtCore import QObject, Signal
 
+from dcmspec.progress import Progress
+
 from dcmspec_explorer.services.iod_loading_service import IODListLoaderWorker
 
 
@@ -51,7 +53,7 @@ class IODListLoaderServiceMediator(BaseServiceMediator):
     This mediator is specific to the IODListLoaderWorker.
     """
 
-    iodlist_progress_signal = Signal(object, int)
+    iodlist_progress_signal = Signal(object, Progress)
     iodlist_loaded_signal = Signal(object, object)
     iodlist_error_signal = Signal(object, str)
 
@@ -79,9 +81,10 @@ class IODListLoaderServiceMediator(BaseServiceMediator):
         self._thread.start()
         return self._worker, self._thread
 
-    def _on_iodlist_progress(self, sender: object, percent: int) -> None:
-        """Translate blinker progress signal to Qt signal."""
-        self.iodlist_progress_signal.emit(sender, percent)
+    def _on_iodlist_progress(self, sender: object = None, progress: Progress = None) -> None:
+        """Translate blinker progress signal (receives a Progress object) to Qt signal."""
+        if progress is not None:
+            self.iodlist_progress_signal.emit(sender, progress)
 
     def _on_iodlist_loaded(self, sender: object, iod_modules: object) -> None:
         """Translate blinker loaded signal to Qt signal."""
