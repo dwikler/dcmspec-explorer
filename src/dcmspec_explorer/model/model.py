@@ -13,6 +13,24 @@ from dcmspec.spec_factory import SpecFactory
 
 from dcmspec_explorer.services.progress_observer import ServiceProgressObserver
 
+# DICOM usage code to text mapping
+DICOM_USAGE_MAP = {
+    "M": "Mandatory (M)",
+    "U": "User Optional (U)",
+    "C": "Conditional (C)",
+    "": "Unspecified",
+}
+
+# DICOM attribute type code to text mapping
+DICOM_TYPE_MAP = {
+    "1": "Mandatory (1)",
+    "1C": "Conditional (1C)",
+    "2": "Mandatory, may be empty (2)",
+    "2C": "Conditional, may be empty (2C)",
+    "3": "Optional (3)",
+    "": "Unspecified",
+}
+
 
 class Model:
     """Data model for DICOM specifications."""
@@ -42,15 +60,17 @@ class Model:
         self.logger.debug("Loading IOD list...")
 
         try:
-            return self._extracted_from_load_iod_list_(force_download, progress_observer)
+            iod_list, version = self._parse_iod_list_from_html(force_download, progress_observer)
+            self._version = version
+            self._iod_root, self._iod_dict = self._build_iods_model(iod_list)
+            return iod_list
         except Exception as e:
             error_msg = f"Failed to load DICOM specification: \n{str(e)}"
             self.logger.error(error_msg)
             raise RuntimeError(error_msg) from e
 
-    # TODO Rename this here and in `load_iod_list`
-    def _extracted_from_load_iod_list_(self, force_download, progress_observer):
-        # Use XHTMLDocHandler to download and parse the HTML with caching
+    def _parse_iod_list_from_html(self, force_download, progress_observer):
+        """Download and parse the HTML, extract IOD list and version."""
         cache_file_name = "ps3.3.html"
         soup = self.doc_handler.load_document(
             cache_file_name=cache_file_name,
@@ -59,21 +79,48 @@ class Model:
             progress_observer=progress_observer,
         )
 
-        # Extract and log DICOM version using the dcmspec library DOMTableSpecParser
-        self.dicom_version = self.dom_parser.get_version(soup, "")
-        self.logger.info(f"Version {self.dicom_version}")
-        # TODO: return for update of Version label
+        # Extract DICOM standard version
+        version = self.dom_parser.get_version(soup, "")
 
-        # Find the list of tables div
+        # Find the list of tables section
         list_of_tables = soup.find("div", class_="list-of-tables")
         if not list_of_tables:
             error_msg = "Could not find list-of-tables section in downloaded HTML document."
             self.logger.error(error_msg)
             raise ValueError(error_msg)
 
-        return self.extract_iod_list(list_of_tables)
+        # Extract IOD list from the list of tables section
+        iod_list = self._extract_iod_list(list_of_tables)
 
-    def extract_iod_list(self, list_of_tables) -> List[Tuple[str, str, str, str]]:
+        return iod_list, version
+
+    def _build_iods_model(self, iod_list):
+        """Build a tree model for IODs and a dict mapping table_id to IOD nodes.
+
+        The tree structure supports later addition of modules and attributes as children of each IOD node.
+        The dict allows fast lookup of IOD nodes by table_id.
+
+        Args:
+            iod_list (list): List of tuples (iod_name, table_id, table_url, iod_kind).
+
+        Returns:
+            tuple: (iod_root, iod_dict)
+                iod_root: The AnyTree root node for all IODs.
+                iod_dict: Dict mapping table_id to the corresponding IOD node.
+
+        """
+        from anytree import Node
+
+        iod_root = Node("IOD List")
+        iod_dict = {}
+        for iod_name, table_id, table_url, iod_kind in iod_list:
+            # Create a node for each IOD and attach it to the root
+            iod_node = Node(iod_name, parent=iod_root, table_id=table_id, table_url=table_url, iod_kind=iod_kind)
+            # Store the node in the dict for fast lookup by table_id
+            iod_dict[table_id] = iod_node
+        return iod_root, iod_dict
+
+    def _extract_iod_list(self, list_of_tables) -> List[Tuple[str, str, str, str]]:
         """Extract list of IODs from the list of tables section.
 
         Returns:
@@ -82,7 +129,7 @@ class Model:
         """
         # Compute the base URL by stripping the filename from part3_toc_url
         base_url = self.part3_toc_url.rsplit("/", 1)[0] + "/"
-        iod_modules = []
+        iods = []
 
         # Find all dt elements
         dt_elements = list_of_tables.find_all("dt")
@@ -121,9 +168,9 @@ class Model:
                     else:
                         iod_kind = "Other"
 
-                    iod_modules.append((iod_name, table_id, table_url, iod_kind))
+                    iods.append((iod_name, table_id, table_url, iod_kind))
 
-        return iod_modules
+        return iods
 
     def load_iod_model(self, table_id: str, logger: logging.Logger, progress_observer: ServiceProgressObserver = None):
         """Load the IOD model for the given table_id using the IODSpecBuilder API.
@@ -191,3 +238,43 @@ class Model:
             force_download=False,
             progress_observer=progress_observer,
         )
+
+    def add_iod_spec_content(self, table_id, iod_content):
+        """Add the loaded IOD specification content (AnyTree node) as a child of its IOD node.
+
+        Args:
+            table_id (str): The table identifier (e.g., "table_A.49-1") of the IOD node
+            iod_content (AnyTree node): The loaded IOD specification content to add
+
+        """
+        iod_node = self._iod_dict.get(table_id)
+        if iod_node and iod_content:
+            iod_content.parent = iod_node
+
+    def get_node_details(self, node_path):
+        """Return all attributes of an Anytree node given its full path in the model.
+
+        This method locates the node in the IOD tree using the provided node_path,
+        and returns its attributes as a dictionary. If the node is not found, returns None.
+
+        Args:
+            node_path (str): The full path to the node (e.g., "IOD List/Some IOD/Some Module/Some Attribute").
+
+        Returns:
+            dict: The node's attributes including anytree metadata.
+            The consumer (controller/view) should select which attributes to display.
+
+        """
+        if not self._iod_root or not node_path:
+            return None
+
+        # Split the path and traverse from the root
+        path_parts = node_path.split("/")
+        node = self._iod_root
+        for part in path_parts[1:]:  # skip "IOD List" (the root itself)
+            node = next((child for child in node.children if child.name == part), None)
+            if node is None:
+                return None
+
+        # Return the node's attributes as a dict
+        return node.__dict__

@@ -10,6 +10,7 @@ from PySide6.QtGui import QStandardItemModel, QStandardItem
 from dcmspec.progress import Progress
 
 from dcmspec_explorer.app_config import load_app_config, setup_logger
+from dcmspec_explorer.model.model import DICOM_TYPE_MAP, DICOM_USAGE_MAP
 from dcmspec_explorer.model.model import Model
 from dcmspec_explorer.services.service_mediator import IODListLoaderServiceMediator, IODModelLoaderServiceMediator
 from dcmspec_explorer.view.load_iod_dialog import LoadIODDialog
@@ -97,10 +98,12 @@ class AppController(QObject):
         if not model:
             return
 
-        # Retrieve data from the columns of the selected item
+        # Retrieve values from the selected treeview item columns
         selected_item_name = model.itemFromIndex(index.siblingAtColumn(0))
         selected_item_kind = model.itemFromIndex(index.siblingAtColumn(1))
-        selected_item_usage = model.itemFromIndex(index.siblingAtColumn(2))
+
+        # Retrieve the node path from the selected item data
+        selected_item_node_path = selected_item_name.data(Qt.UserRole) if selected_item_name else None
 
         # Check the clicked item level and take appropriate action
         if index.parent().isValid() is False:
@@ -109,11 +112,11 @@ class AppController(QObject):
 
         elif index.parent().parent().isValid() is False:
             # second-level (Module)
-            self._handle_module_item_clicked(selected_item_name, selected_item_usage)
+            self._handle_module_item_clicked(selected_item_node_path)
 
         else:
             # third-level (Attribute)
-            self._handle_attribute_item_clicked(selected_item_name, selected_item_usage)
+            self._handle_attribute_item_clicked(selected_item_node_path)
 
     def _handle_iod_item_clicked(self, index, selected_item_name, selected_item_kind):
         """Handle click on a top-level (IOD) item."""
@@ -141,66 +144,55 @@ class AppController(QObject):
         self._iod_model_worker, self._iod_model_thread = self.iod_model_service.start_iodmodel_worker(table_id)
 
         # Connect signals to handlers for progress, loaded, and error
-        self.iod_model_service.iodmodel_progress_signal.connect(self._update_iodmodel_progress_ui, Qt.QueuedConnection)
+        self.iod_model_service.iodmodel_progress_signal.connect(self._handle_iodmodel_progress, Qt.QueuedConnection)
         self.iod_model_service.iodmodel_loaded_signal.connect(
-            lambda sender, iod_model: self._update_iodmodel_loaded_ui(
+            lambda sender, iod_model: self._handle_iodmodel_loaded(
                 sender,
                 iod_model,
                 selected_item_name,  # add selected_item_name to received signal parameters
             ),
             Qt.QueuedConnection,
         )
-        self.iod_model_service.iodmodel_error_signal.connect(self._update_iodmodel_error_ui, Qt.QueuedConnection)
+        self.iod_model_service.iodmodel_error_signal.connect(self._handle_iodmodel_error, Qt.QueuedConnection)
 
         # Set expand property for the selected iod item in the view (will be effective when item will be populated)
         self.view.ui.iodTreeView.expand(index)
 
-    def _handle_module_item_clicked(self, selected_item_name, selected_item_usage):
+    def _handle_module_item_clicked(self, selected_item_path):
         """Handle click on a second-level (Module) item."""
-        selected_item_usage = selected_item_usage.text() if selected_item_usage else None
-        if selected_item_usage:
-            # Format usage as a single line with description and code
-            if selected_item_usage.startswith("M"):
-                usage_display = "Mandatory (M)"
-            elif selected_item_usage.startswith("U"):
-                usage_display = "User Optional (U)"
-            elif selected_item_usage.startswith("C"):
-                # For conditional, include the conditional statement
-                if len(selected_item_usage) > 1 and " - " in selected_item_usage:
-                    conditional_part = selected_item_usage[selected_item_usage.find(" - ") + 3 :]
-                    usage_display = f"Conditional (C) - {conditional_part}"
-                else:
-                    usage_display = "Conditional (C)"
-            else:
-                usage_display = selected_item_usage
-        # Second level (Module)
-        html = f"""<h1>{selected_item_name.text()} Module</h1>
+        # Get attribute details from the model using only the node_path
+        details = self.model.get_node_details(selected_item_path)
+
+        if details:
+            ie = details.get("ie", "Unspecified")
+            usage = details.get("usage", "")
+            usage_display = DICOM_USAGE_MAP.get(usage, f"Other ({usage})")
+            html = f"""<h1>{details.get("module", "Unknown")} Module</h1>
+                <p><span class="label">IE:</span> {ie}</p>
                 <p><span class="label">Usage:</span> {usage_display}</p>
+                <p><span class="label">Reference:</span> {details.get("ref", "")}</p>
                 """
+        else:
+            # Fallback: only show the attribute path
+            html = f"""<h1>{selected_item_path} Module</h1>"""
         self.view.set_details_html(html)
 
-    def _handle_attribute_item_clicked(self, selected_item_name, selected_item_usage):
+    def _handle_attribute_item_clicked(self, selected_item_path):
         """Handle click on a third-level or deeper (Attribute) item."""
-        selected_item_usage = selected_item_usage.text() if selected_item_usage else None
-        if selected_item_usage:
-            # Map DICOM attribute types to meaningful descriptions
-            type_map = {
-                "1": "Mandatory (1)",
-                "1C": "Conditional (1C)",
-                "2": "Mandatory, may be empty (2)",
-                "2C": "Conditional, may be empty (2C)",
-                "3": "Optional (3)",
-                "": "Unspecified",
-            }
-            type_display = (
-                type_map.get(selected_item_usage, f"Other ({selected_item_usage})")
-                if selected_item_usage
-                else "Unspecified"
-            )
-        # Third level and beyond (attributes)
-        html = f"""<h1>{selected_item_name.text()} Attribute</h1>
+        # Get attribute details from the model using only the node_path
+        details = self.model.get_node_details(selected_item_path)
+
+        if details:
+            elem_type = details.get("elem_type", "Unspecified")
+            type_display = DICOM_TYPE_MAP.get(elem_type, f"Other ({elem_type})")
+            html = f"""<h1>{details.get("elem_name", "Unknown")} Attribute</h1>
+                <p><span class="label">Tag:</span> {details.get("elem_tag", "")}</p>
                 <p><span class="label">Type:</span> {type_display}</p>
+                <p><span class="label">Description:</span> {details.get("elem_description", "")}</p>
                 """
+        else:
+            # Fallback: only show the attribute path
+            html = f"""<h1>{selected_item_path} Attribute</h1>"""
         self.view.set_details_html(html)
 
     def _update_iodlist_progress_ui(self, sender: object, progress: Progress) -> None:
@@ -222,7 +214,7 @@ class AppController(QObject):
         self.view.show_error(message)
         self.view.update_status_bar(message="Error loading IOD modules.")
 
-    def _update_iodmodel_progress_ui(self, sender: object, progress: Progress) -> None:
+    def _handle_iodmodel_progress(self, sender: object, progress: Progress) -> None:
         status = progress.status
         percent = progress.percent
         step = progress.step
@@ -236,8 +228,12 @@ class AppController(QObject):
         if hasattr(self, "progress_dialog") and self.progress_dialog:
             self.progress_dialog.update_step(status, percent)
 
-    def _update_iodmodel_loaded_ui(self, sender: object, iod_model: object, parent_item) -> None:
+    def _handle_iodmodel_loaded(self, sender: object, iod_model: object, parent_item) -> None:
         if iod_model and hasattr(iod_model, "content"):
+            # Attach the loaded IOD model's content to the model's tree
+            table_id = parent_item.data(Qt.UserRole)
+            self.model.add_iod_spec_content(table_id, iod_model.content)
+
             self._populate_qt_tree_model_item(parent_item, iod_model.content)
             # Hide progress dialog and re-enable treeview
             if hasattr(self, "progress_dialog") and self.progress_dialog:
@@ -246,7 +242,7 @@ class AppController(QObject):
             self.view.ui.iodTreeView.setEnabled(True)
             self.view.update_status_bar(message="IOD specification loaded.")
 
-    def _update_iodmodel_error_ui(self, sender: object, message: str) -> None:
+    def _handle_iodmodel_error(self, sender: object, message: str) -> None:
         self.logger.error(f"Error loading IOD model: {message}")
         # Hide progress dialog and re-enable treeview
         if hasattr(self, "progress_dialog") and self.progress_dialog:
