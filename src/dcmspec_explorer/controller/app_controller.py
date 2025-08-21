@@ -2,6 +2,8 @@
 
 import threading
 
+from anytree import PreOrderIter
+
 from PySide6.QtCore import Qt, QTimer, QObject
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 
@@ -9,7 +11,8 @@ from dcmspec.progress import Progress
 
 from dcmspec_explorer.app_config import load_app_config, setup_logger
 from dcmspec_explorer.model.model import Model
-from dcmspec_explorer.services.service_mediator import IODListLoaderServiceMediator
+from dcmspec_explorer.services.service_mediator import IODListLoaderServiceMediator, IODModelLoaderServiceMediator
+from dcmspec_explorer.view.load_iod_dialog import LoadIODDialog
 from dcmspec_explorer.view.main_window import MainWindow
 
 
@@ -59,11 +62,15 @@ class AppController(QObject):
         self.model = Model(self.config, self.logger)
         self.view = MainWindow()
 
-        # Initialize the service mediator
+        # Initialize the service mediators
         self.service = IODListLoaderServiceMediator(self.model, self.logger, parent=self)
+        self.iod_model_service = IODModelLoaderServiceMediator(self.model, self.logger, parent=self)
 
         # Use QTimer to ensure the treeview is only initialized after the window is shown
         QTimer.singleShot(0, self.initialize_treeview)
+
+        # Connect UI elements to handlers
+        self.view.ui.iodTreeView.clicked.connect(self._on_treeview_item_clicked)
 
     def initialize_treeview(self) -> None:
         """Initialize the treeview with list of IODs.
@@ -84,6 +91,118 @@ class AppController(QObject):
         self.service.iodlist_loaded_signal.connect(self._update_iodlist_loaded_ui, Qt.QueuedConnection)
         self.service.iodlist_error_signal.connect(self._update_iodlist_error_ui, Qt.QueuedConnection)
 
+    def _on_treeview_item_clicked(self, index):
+        """Handle selection of a treeview item."""
+        model = index.model()
+        if not model:
+            return
+
+        # Retrieve data from the columns of the selected item
+        selected_item_name = model.itemFromIndex(index.siblingAtColumn(0))
+        selected_item_kind = model.itemFromIndex(index.siblingAtColumn(1))
+        selected_item_usage = model.itemFromIndex(index.siblingAtColumn(2))
+
+        # Check the clicked item level and take appropriate action
+        if index.parent().isValid() is False:
+            # top-level (IOD)
+            self._handle_iod_item_clicked(index, selected_item_name, selected_item_kind)
+
+        elif index.parent().parent().isValid() is False:
+            # second-level (Module)
+            self._handle_module_item_clicked(selected_item_name, selected_item_usage)
+
+        else:
+            # third-level (Attribute)
+            self._handle_attribute_item_clicked(selected_item_name, selected_item_usage)
+
+    def _handle_iod_item_clicked(self, index, selected_item_name, selected_item_kind):
+        """Handle click on a top-level (IOD) item."""
+        # Update contents of the details panel
+        table_id = selected_item_name.data(Qt.UserRole) if selected_item_name else None
+        table_url = selected_item_name.data(Qt.UserRole + 1) if selected_item_name else None
+        table_ref = table_id.split("table_", 1)[-1] if table_id and table_id.startswith("table_") else table_id
+        html = f"""<h1>{selected_item_name.text()} IOD</h1>
+                <p><span class="label">IOD Kind:</span> {selected_item_kind.text() if selected_item_kind else ""}</p>
+                <p>See <a href="{table_url}">PS3.3 Table {table_ref}</a></p>
+                """
+        self.view.set_details_html(html)
+
+        # Stop here if children are already populated
+        if selected_item_name.hasChildren() and selected_item_name.rowCount() > 0:
+            return
+
+        # Update status bar message and display progress dialog
+        self.view.update_status_bar(message="Loading IOD specification...")
+        self.progress_dialog = LoadIODDialog(self.view)
+        self.progress_dialog.show()
+        self.view.ui.iodTreeView.setEnabled(False)
+
+        # Start the IOD model loader worker in a background thread
+        self._iod_model_worker, self._iod_model_thread = self.iod_model_service.start_iodmodel_worker(table_id)
+
+        # Connect signals to handlers for progress, loaded, and error
+        self.iod_model_service.iodmodel_progress_signal.connect(self._update_iodmodel_progress_ui, Qt.QueuedConnection)
+        self.iod_model_service.iodmodel_loaded_signal.connect(
+            lambda sender, iod_model: self._update_iodmodel_loaded_ui(
+                sender,
+                iod_model,
+                selected_item_name,  # add selected_item_name to received signal parameters
+            ),
+            Qt.QueuedConnection,
+        )
+        self.iod_model_service.iodmodel_error_signal.connect(self._update_iodmodel_error_ui, Qt.QueuedConnection)
+
+        # Set expand property for the selected iod item in the view (will be effective when item will be populated)
+        self.view.ui.iodTreeView.expand(index)
+
+    def _handle_module_item_clicked(self, selected_item_name, selected_item_usage):
+        """Handle click on a second-level (Module) item."""
+        selected_item_usage = selected_item_usage.text() if selected_item_usage else None
+        if selected_item_usage:
+            # Format usage as a single line with description and code
+            if selected_item_usage.startswith("M"):
+                usage_display = "Mandatory (M)"
+            elif selected_item_usage.startswith("U"):
+                usage_display = "User Optional (U)"
+            elif selected_item_usage.startswith("C"):
+                # For conditional, include the conditional statement
+                if len(selected_item_usage) > 1 and " - " in selected_item_usage:
+                    conditional_part = selected_item_usage[selected_item_usage.find(" - ") + 3 :]
+                    usage_display = f"Conditional (C) - {conditional_part}"
+                else:
+                    usage_display = "Conditional (C)"
+            else:
+                usage_display = selected_item_usage
+        # Second level (Module)
+        html = f"""<h1>{selected_item_name.text()} Module</h1>
+                <p><span class="label">Usage:</span> {usage_display}</p>
+                """
+        self.view.set_details_html(html)
+
+    def _handle_attribute_item_clicked(self, selected_item_name, selected_item_usage):
+        """Handle click on a third-level or deeper (Attribute) item."""
+        selected_item_usage = selected_item_usage.text() if selected_item_usage else None
+        if selected_item_usage:
+            # Map DICOM attribute types to meaningful descriptions
+            type_map = {
+                "1": "Mandatory (1)",
+                "1C": "Conditional (1C)",
+                "2": "Mandatory, may be empty (2)",
+                "2C": "Conditional, may be empty (2C)",
+                "3": "Optional (3)",
+                "": "Unspecified",
+            }
+            type_display = (
+                type_map.get(selected_item_usage, f"Other ({selected_item_usage})")
+                if selected_item_usage
+                else "Unspecified"
+            )
+        # Third level and beyond (attributes)
+        html = f"""<h1>{selected_item_name.text()} Attribute</h1>
+                <p><span class="label">Type:</span> {type_display}</p>
+                """
+        self.view.set_details_html(html)
+
     def _update_iodlist_progress_ui(self, sender: object, progress: Progress) -> None:
         percent = progress.percent
         if percent == -1:
@@ -94,20 +213,54 @@ class AppController(QObject):
             self.view.update_status_bar(f"Loading IOD modules... {percent}%")
 
     def _update_iodlist_loaded_ui(self, sender: object, iod_modules: object) -> None:
-        qt_tree_model = self._build_qt_tree_model(iod_modules)
+        qt_tree_model = self._populate_qt_tree_model_top_level(iod_modules)
         self.view.update_treeview(qt_tree_model)
-        self.view.update_status_bar(message=f"Loaded {len(iod_modules)} IOD modules.")
+        self.view.update_status_bar(message=f"Listed {len(iod_modules)} IODs.")
 
     def _update_iodlist_error_ui(self, sender: object, message: str) -> None:
         self.logger.error(f"Error signal received from {sender}: {message}")
         self.view.show_error(message)
         self.view.update_status_bar(message="Error loading IOD modules.")
 
+    def _update_iodmodel_progress_ui(self, sender: object, progress: Progress) -> None:
+        status = progress.status
+        percent = progress.percent
+        step = progress.step
+        total_steps = progress.total_steps
+        percent = progress.percent
+        self.logger.debug(
+            f"IOD model progress update: status={status}, step={step}, total_steps={total_steps}, percent={percent}%"
+        )
+
+        # Update the progress dialog
+        if hasattr(self, "progress_dialog") and self.progress_dialog:
+            self.progress_dialog.update_step(status, percent)
+
+    def _update_iodmodel_loaded_ui(self, sender: object, iod_model: object, parent_item) -> None:
+        if iod_model and hasattr(iod_model, "content"):
+            self._populate_qt_tree_model_item(parent_item, iod_model.content)
+            # Hide progress dialog and re-enable treeview
+            if hasattr(self, "progress_dialog") and self.progress_dialog:
+                self.progress_dialog.accept()
+                self.progress_dialog = None
+            self.view.ui.iodTreeView.setEnabled(True)
+            self.view.update_status_bar(message="IOD specification loaded.")
+
+    def _update_iodmodel_error_ui(self, sender: object, message: str) -> None:
+        self.logger.error(f"Error loading IOD model: {message}")
+        # Hide progress dialog and re-enable treeview
+        if hasattr(self, "progress_dialog") and self.progress_dialog:
+            self.progress_dialog.reject()
+            self.progress_dialog = None
+        self.view.ui.iodTreeView.setEnabled(True)
+        self.view.show_error(message)
+        self.view.update_status_bar(message="Error loading IOD specification.")
+
     def run(self) -> None:
         """Show the main application window and start the user interface."""
         self.view.show()
 
-    def _build_qt_tree_model(
+    def _populate_qt_tree_model_top_level(
         self, iod_list: list[tuple[str, str, str, str]], favorites_manager: object = None
     ) -> QStandardItemModel:
         """Convert a list of IOD module tuples into a QStandardItemModel for use with a QTreeView.
@@ -123,17 +276,66 @@ class AppController(QObject):
         model = QStandardItemModel()
         model.setHorizontalHeaderLabels(["Name", "Kind", "", "♥"])
 
-        is_favorite = ""
-        for title, table_id, href, iod_type in iod_list:
-            title_item = QStandardItem(title)
-            kind_item = QStandardItem(iod_type)
-            usage_item = QStandardItem("")  # Usage column is empty for now
-            favorite_item = QStandardItem(is_favorite)
+        item_favorite_flag = ""
+        for iod_name, table_id, table_url, iod_kind in iod_list:
+            item_name = QStandardItem(iod_name)
+            item_kind = QStandardItem(iod_kind)
+            item_usage = QStandardItem("")  # Usage column is empty for now
+            item_favorite_flag = QStandardItem(item_favorite_flag)
 
             # Store table_id and iod_type as data for later retrieval
-            title_item.setData(table_id, role=Qt.UserRole)
-            kind_item.setData(iod_type, role=Qt.UserRole + 1)
+            item_name.setData(table_id, role=Qt.UserRole)
+            item_name.setData(table_url, role=Qt.UserRole + 1)
 
-            model.appendRow([title_item, kind_item, usage_item, favorite_item])
+            model.appendRow([item_name, item_kind, item_usage, item_favorite_flag])
 
         return model
+
+    def _populate_qt_tree_model_item(self, parent_item, content):
+        """Populate the tree with IOD structure from the model content using AnyTree traversal."""
+        if not content:
+            return
+
+        tree_items = {}  # Map from node to QStandardItem for building hierarchy
+
+        for node in PreOrderIter(content):
+            if node == content:
+                continue  # Skip the root content node
+
+            # Determine the parent tree item
+            if node.parent == content:
+                parent_tree_item = parent_item
+            else:
+                parent_tree_item = tree_items.get(node.parent, parent_item)
+
+            # Determine node type and display text
+            if hasattr(node, "module"):
+                module_name = getattr(node, "module", "Unknown Module")
+                display_text = module_name
+                node_type = "Module"
+                usage = getattr(node, "usage", "")[:1] if hasattr(node, "usage") else ""
+            elif hasattr(node, "elem_name"):
+                attr_name = getattr(node, "elem_name", "Unknown Attribute")
+                attr_tag = getattr(node, "elem_tag", "")
+                elem_type = getattr(node, "elem_type", "")
+                display_text = f"{attr_tag} {attr_name}" if attr_tag else attr_name
+                node_type = "Attribute"
+                usage = elem_type
+            else:
+                display_text = str(getattr(node, "name", "Unknown Node"))
+                node_type = "Unknown"
+                usage = ""
+
+            # Create QStandardItems for each column
+            name = QStandardItem(display_text)
+            kind = QStandardItem(node_type)
+            usage = QStandardItem(usage)
+            favorite_flag = QStandardItem("")
+
+            # Optionally, store node path or other data for later retrieval
+            node_path = "/".join([str(n.name) for n in node.path])
+            name.setData(node_path, role=Qt.UserRole)
+
+            # Append the row to the parent tree item
+            parent_tree_item.appendRow([name, kind, usage, favorite_flag])
+            tree_items[node] = name

@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, Signal, QTimer
 from dcmspec.progress import Progress
 
 from dcmspec_explorer.services.iod_loading_service import IODListLoaderWorker
+from dcmspec_explorer.services.iod_loading_service import IODModelLoaderWorker
 
 
 class BaseServiceMediator(QObject):
@@ -112,5 +113,44 @@ class IODListLoaderServiceMediator(BaseServiceMediator):
                 self._poll_timer.stop()
             elif event_type == "error":
                 self.iodlist_error_signal.emit(self, data)
+                self.cleanup_worker_thread()
+                self._poll_timer.stop()
+
+
+class IODModelLoaderServiceMediator(BaseServiceMediator):
+    """Mediator for loading a single IOD model in a background thread."""
+
+    iodmodel_progress_signal = Signal(object, Progress)
+    iodmodel_loaded_signal = Signal(object, object)
+    iodmodel_error_signal = Signal(object, str)
+
+    def __init__(self, model: Any, logger: Any, parent: Optional[QObject] = None) -> None:
+        """Initialize the service mediator for loading a single IOD model."""
+        super().__init__(model, logger, parent)
+
+    def start_iodmodel_worker(self, table_id: str):
+        """Start the IOD model loader worker in a background thread."""
+        self._event_queue = queue.Queue()
+        self._worker = IODModelLoaderWorker(self.model, table_id, logger=self.logger, event_queue=self._event_queue)
+        self._thread = threading.Thread(target=self._worker.run, daemon=True)
+        self._thread.start()
+
+        self._poll_timer = QTimer(self)
+        self._poll_timer.timeout.connect(self._poll_event_queue)
+        self._poll_timer.start(50)
+
+        return self._worker, self._thread
+
+    def _poll_event_queue(self):
+        while not self._event_queue.empty():
+            event_type, data = self._event_queue.get()
+            if event_type == "progress":
+                self.iodmodel_progress_signal.emit(self, data)
+            elif event_type == "loaded":
+                self.iodmodel_loaded_signal.emit(self, data)
+                self.cleanup_worker_thread()
+                self._poll_timer.stop()
+            elif event_type == "error":
+                self.iodmodel_error_signal.emit(self, data)
                 self.cleanup_worker_thread()
                 self._poll_timer.stop()

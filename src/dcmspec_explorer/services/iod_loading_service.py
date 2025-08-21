@@ -37,3 +37,32 @@ class IODListLoaderWorker:
             self.event_queue.put(("loaded", iod_modules))
         except Exception as e:
             self.event_queue.put(("error", str(e)))
+
+
+class IODModelLoaderWorker:
+    """Load a single IOD model in a background thread."""
+
+    def __init__(self, model: Any, table_id: str, logger: logging.Logger, event_queue: queue.Queue) -> None:
+        """Initialize the worker with the model and table ID.
+
+        Args:
+            model: The model instance to use for loading the IOD model.
+            table_id: The table ID of the IOD model to load.
+            logger: The logger instance for logging progress and errors.
+            event_queue: The event queue to put progress updates into.
+
+        """
+        self.model = model
+        self.table_id = table_id
+        self.logger = logger
+        self.event_queue = event_queue
+
+    def run(self) -> None:
+        """Run the worker to load a single IOD model and send events to the event queue."""
+        self.logger.debug(f"IODModelLoaderWorker created in thread: {threading.current_thread().name}")
+        progress_observer = ServiceProgressObserver(self.event_queue)
+        try:
+            iod_model = self.model.load_iod_model(self.table_id, self.logger, progress_observer=progress_observer)
+            self.event_queue.put(("loaded", iod_model))
+        except Exception as e:
+            self.event_queue.put(("error", str(e)))
