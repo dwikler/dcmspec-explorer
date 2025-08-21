@@ -88,9 +88,9 @@ class AppController(QObject):
         # the connected slot (UI update method) will be executed in the thread that owns the receiver object.
         # In this case, both the ServiceMediator and AppController live in the main thread, so UI updates
         # are performed in the main thread, ensuring thread safety for all Qt UI operations.
-        self.service.iodlist_progress_signal.connect(self._update_iodlist_progress_ui, Qt.QueuedConnection)
-        self.service.iodlist_loaded_signal.connect(self._update_iodlist_loaded_ui, Qt.QueuedConnection)
-        self.service.iodlist_error_signal.connect(self._update_iodlist_error_ui, Qt.QueuedConnection)
+        self.service.iodlist_progress_signal.connect(self._handle_iodlist_progress, Qt.QueuedConnection)
+        self.service.iodlist_loaded_signal.connect(self._handle_iodlist_loaded, Qt.QueuedConnection)
+        self.service.iodlist_error_signal.connect(self._handle_iodlist_error, Qt.QueuedConnection)
 
     def _on_treeview_item_clicked(self, index):
         """Handle selection of a treeview item."""
@@ -195,7 +195,7 @@ class AppController(QObject):
             html = f"""<h1>{selected_item_path} Attribute</h1>"""
         self.view.set_details_html(html)
 
-    def _update_iodlist_progress_ui(self, sender: object, progress: Progress) -> None:
+    def _handle_iodlist_progress(self, sender: object, progress: Progress) -> None:
         percent = progress.percent
         if percent == -1:
             self.logger.debug("Unknown progress received (-1).")
@@ -204,12 +204,16 @@ class AppController(QObject):
             self.logger.debug(f"Progress update: {percent}%")
             self.view.update_status_bar(f"Loading IOD modules... {percent}%")
 
-    def _update_iodlist_loaded_ui(self, sender: object, iod_modules: object) -> None:
-        qt_tree_model = self._populate_qt_tree_model_top_level(iod_modules)
+    def _handle_iodlist_loaded(self, sender: object, iod_list: object) -> None:
+        # Populate the tree model with the loaded IODs
+        qt_tree_model = self._populate_qt_tree_model_top_level(iod_list)
         self.view.update_treeview(qt_tree_model)
-        self.view.update_status_bar(message=f"Listed {len(iod_modules)} IODs.")
+        # Update the version label with the model's version
+        if self.model.version:
+            self.view.ui.versionLabel.setText(f"Version: {self.model.version}")
+        self.view.update_status_bar(message=f"Listed {len(iod_list)} IODs.")
 
-    def _update_iodlist_error_ui(self, sender: object, message: str) -> None:
+    def _handle_iodlist_error(self, sender: object, message: str) -> None:
         self.logger.error(f"Error signal received from {sender}: {message}")
         self.view.show_error(message)
         self.view.update_status_bar(message="Error loading IOD modules.")

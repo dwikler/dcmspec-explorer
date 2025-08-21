@@ -46,6 +46,11 @@ class Model:
         # Initialize DOM parser for DICOM standard version extraction
         self.dom_parser = DOMTableSpecParser(logger=self.logger)
 
+    @property
+    def version(self):
+        """Return the DICOM version string for the loaded iod_list."""
+        return getattr(self, "_version", None)
+
     def load_iod_list(self, force_download: bool = False, progress_observer: ServiceProgressObserver = None):
         """Load list of IODs from the DICOM PS3.3 List of Tables.
 

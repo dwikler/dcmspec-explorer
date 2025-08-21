@@ -91,9 +91,9 @@ class IODListLoaderServiceMediator(BaseServiceMediator):
         if progress is not None:
             self.iodlist_progress_signal.emit(sender, progress)
 
-    def _on_iodlist_loaded(self, sender: object, iod_modules: object) -> None:
+    def _on_iodlist_loaded(self, sender: object, iod_list: object) -> None:
         """Translate blinker loaded signal to Qt signal."""
-        self.iodlist_loaded_signal.emit(sender, iod_modules)
+        self.iodlist_loaded_signal.emit(sender, iod_list)
         self.cleanup_worker_thread()
 
     def _on_iodlist_error(self, sender: object, message: str) -> None:
