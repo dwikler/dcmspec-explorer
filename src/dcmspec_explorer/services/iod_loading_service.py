@@ -1,42 +1,68 @@
 """IOD Loader Services for DCMspec Explorer."""
 
+import logging
+import queue
 import threading
-from PySide6.QtCore import QObject, Signal
+from typing import Any
+
+from dcmspec_explorer.services.progress_observer import ServiceProgressObserver
 
 
-class IODListLoaderWorker(QObject):
+class IODListLoaderWorker:
     """Load IOD list in a background thread."""
 
-    finished = Signal(list)
-    error = Signal(str)
-    progress = Signal(int)
+    def __init__(self, model: Any, logger: logging.Logger, event_queue: queue.Queue) -> None:
+        """Initialize the worker with the model to load IOD list.
 
-    def __init__(self, model, logger):
-        """Initialize the worker with the model to load IOD list."""
-        super().__init__()
+        Args:
+            model: The model instance to use for loading the IOD list.
+            logger: The logger instance for logging progress and errors.
+            event_queue: The event queue to put progress updates into.
+
+        """
         self.model = model
         self.logger = logger
+        self.event_queue = event_queue
 
-    def run(self):
-        """Run the worker to load IOD list."""
+    def run(self) -> None:
+        """Run the worker to load IOD list and send events to the event queue."""
         # Log thread information
         self.logger.debug(f"TreeviewLoaderWorker created in thread: {threading.current_thread().name}")
 
-        def emit_percent(percent):
-            """Define callback function to receive progress updates.
-
-            This function emits a custom signal with the progress percentage.
-            A nested function is used here because dcmspec checks for types.FunctionType
-            to provide backward-compatibility for callbacks expecting an int.
-            This check allows plain functions, nested functions, and lambdas, but excludes
-            bound methods (like self.emit_percent).
-            By using a nested function, we can access 'self' via closure while still
-            complying with dcmspec's callback requirements.
-            """
-            self.progress.emit(percent)
+        # Use a ServiceProgressObserver instance for dcmspec to report progress updates into the event queue
+        progress_observer = ServiceProgressObserver(self.event_queue)
 
         try:
-            iod_modules = self.model.load_iod_list(progress_callback=emit_percent)
-            self.finished.emit(iod_modules)
+            iod_modules = self.model.load_iod_list(progress_observer=progress_observer)
+            self.event_queue.put(("loaded", iod_modules))
         except Exception as e:
-            self.error.emit(str(e))
+            self.event_queue.put(("error", str(e)))
+
+
+class IODModelLoaderWorker:
+    """Load a single IOD model in a background thread."""
+
+    def __init__(self, model: Any, table_id: str, logger: logging.Logger, event_queue: queue.Queue) -> None:
+        """Initialize the worker with the model and table ID.
+
+        Args:
+            model: The model instance to use for loading the IOD model.
+            table_id: The table ID of the IOD model to load.
+            logger: The logger instance for logging progress and errors.
+            event_queue: The event queue to put progress updates into.
+
+        """
+        self.model = model
+        self.table_id = table_id
+        self.logger = logger
+        self.event_queue = event_queue
+
+    def run(self) -> None:
+        """Run the worker to load a single IOD model and send events to the event queue."""
+        self.logger.debug(f"IODModelLoaderWorker created in thread: {threading.current_thread().name}")
+        progress_observer = ServiceProgressObserver(self.event_queue)
+        try:
+            iod_model = self.model.load_iod_model(self.table_id, self.logger, progress_observer=progress_observer)
+            self.event_queue.put(("loaded", iod_model))
+        except Exception as e:
+            self.event_queue.put(("error", str(e)))

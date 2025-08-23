@@ -15,16 +15,17 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QMainWindow, QMenuBar, QPushButton,
-    QSizePolicy, QSpacerItem, QSplitter, QStatusBar,
-    QTextEdit, QTreeView, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QHBoxLayout, QHeaderView,
+    QLabel, QLineEdit, QMainWindow, QMenuBar,
+    QPushButton, QSizePolicy, QSpacerItem, QSplitter,
+    QStatusBar, QTextBrowser, QTreeView, QVBoxLayout,
+    QWidget)
 
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
         if not MainWindow.objectName():
             MainWindow.setObjectName(u"MainWindow")
-        MainWindow.resize(1080, 768)
+        MainWindow.resize(1400, 768)
         sizePolicy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
@@ -37,6 +38,7 @@ class Ui_MainWindow(object):
         self.verticalLayout_3.setObjectName(u"verticalLayout_3")
         self.controlArea = QWidget(self.centralwidget)
         self.controlArea.setObjectName(u"controlArea")
+        self.controlArea.setEnabled(True)
         sizePolicy.setHeightForWidth(self.controlArea.sizePolicy().hasHeightForWidth())
         self.controlArea.setSizePolicy(sizePolicy)
         self.horizontalLayout = QHBoxLayout(self.controlArea)
@@ -48,11 +50,14 @@ class Ui_MainWindow(object):
 
         self.searchLineEdit = QLineEdit(self.controlArea)
         self.searchLineEdit.setObjectName(u"searchLineEdit")
+        self.searchLineEdit.setEnabled(True)
+        sizePolicy.setHeightForWidth(self.searchLineEdit.sizePolicy().hasHeightForWidth())
+        self.searchLineEdit.setSizePolicy(sizePolicy)
         self.searchLineEdit.setClearButtonEnabled(True)
 
         self.horizontalLayout.addWidget(self.searchLineEdit)
 
-        self.horizontalSpacer = QSpacerItem(386, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.horizontalSpacer = QSpacerItem(700, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
         self.horizontalLayout.addItem(self.horizontalSpacer)
 
@@ -94,6 +99,7 @@ class Ui_MainWindow(object):
 
         self.iodTreeView = QTreeView(self.iodlistarea)
         self.iodTreeView.setObjectName(u"iodTreeView")
+        self.iodTreeView.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
         self.verticalLayout.addWidget(self.iodTreeView)
 
@@ -112,10 +118,12 @@ class Ui_MainWindow(object):
 
         self.verticalLayout_2.addWidget(self.detailsLabel)
 
-        self.detailsTextEdit = QTextEdit(self.detailsArea)
-        self.detailsTextEdit.setObjectName(u"detailsTextEdit")
+        self.detailsTextBrowser = QTextBrowser(self.detailsArea)
+        self.detailsTextBrowser.setObjectName(u"detailsTextBrowser")
+        self.detailsTextBrowser.setOpenExternalLinks(False)
+        self.detailsTextBrowser.setOpenLinks(False)
 
-        self.verticalLayout_2.addWidget(self.detailsTextEdit)
+        self.verticalLayout_2.addWidget(self.detailsTextBrowser)
 
         self.splitter.addWidget(self.detailsArea)
 
@@ -124,7 +132,7 @@ class Ui_MainWindow(object):
         MainWindow.setCentralWidget(self.centralwidget)
         self.menubar = QMenuBar(MainWindow)
         self.menubar.setObjectName(u"menubar")
-        self.menubar.setGeometry(QRect(0, 0, 1080, 24))
+        self.menubar.setGeometry(QRect(0, 0, 1400, 43))
         MainWindow.setMenuBar(self.menubar)
         self.statusbar = QStatusBar(MainWindow)
         self.statusbar.setObjectName(u"statusbar")
