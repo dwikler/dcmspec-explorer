@@ -2,8 +2,8 @@
 
 import os
 
-from PySide6.QtCore import Signal, QUrl, Qt
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Signal, QUrl, Qt, QModelIndex
+from PySide6.QtGui import QFont, QStandardItemModel, QShowEvent
 from PySide6.QtWidgets import QMainWindow
 from PySide6.QtWidgets import QMessageBox
 
@@ -48,12 +48,12 @@ class MainWindow(QMainWindow):
         # Connect to UI widgets signals
         self.ui.iodTreeView.clicked.connect(self._on_treeview_item_clicked)
 
-    def set_details_html(self, html_body: str):
+    def set_details_html(self, html_body: str) -> None:
         """Set the HTML content of the details pane, injecting the loaded CSS."""
         html = f"<style>{self.details_css}</style>\n{html_body}"
         self.ui.detailsTextBrowser.setHtml(html)
 
-    def showEvent(self, event):
+    def showEvent(self, event: QShowEvent) -> None:
         """Override the Qt showEvent to emit a custom signal after the window is shown.
 
         Allows to add custom behavior that should happen right after the window is displayed to the user.
@@ -65,7 +65,7 @@ class MainWindow(QMainWindow):
         # Emit a custom signal to notify that the window has been shown.
         self.window_shown.emit()
 
-    def _on_treeview_item_clicked(self, index):
+    def _on_treeview_item_clicked(self, index: QModelIndex) -> None:
         """Emit a custom signal when a treeview item is clicked.
 
         Args:
@@ -74,11 +74,11 @@ class MainWindow(QMainWindow):
         """
         self.iod_treeview_item_selected.emit(index)
 
-    def update_status_bar(self, message):
+    def update_status_bar(self, message: str) -> None:
         """Update the status bar with a message."""
         self.statusBar().showMessage(message)
 
-    def update_treeview(self, tree_model):
+    def update_treeview(self, tree_model: QStandardItemModel) -> None:
         """Update the treeview with a new model."""
         self.ui.iodTreeView.setModel(tree_model)
         # Set default column widths
@@ -87,11 +87,11 @@ class MainWindow(QMainWindow):
         self.ui.iodTreeView.setColumnWidth(2, 30)  # Usage
         self.ui.iodTreeView.setColumnWidth(3, 20)  # Favorite
 
-    def show_error(self, message):
+    def show_error(self, message: str) -> None:
         """Show an error message dialog."""
         QMessageBox.critical(self, "Error", message)
 
-    def show_url_link_warning_dialog(self, url_str):
+    def show_url_link_warning_dialog(self, url_str: str) -> bool:
         """Show a warning dialog before opening an external link and open if confirmed."""
         url = QUrl(url_str)
         reply = QMessageBox.warning(

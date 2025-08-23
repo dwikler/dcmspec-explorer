@@ -13,28 +13,74 @@ from dcmspec_explorer.services.iod_loading_service import IODModelLoaderWorker
 
 
 class BaseServiceMediator(QObject):
-    """Base mediator for service workers, providing common threading and cleanup logic.
+    """Manage background worker lifecycle and event-to-signal dispatch for service mediators.
 
-    This class provides shared logic for managing worker threads and cleanup. Subclasses should
-    implement worker-specific signal translation and startup logic.
+    This base class handles starting a background worker in a thread, polling its event queue,
+    and emitting Qt signals mapped to worker events.
+    Subclasses must define a `_signal_map` attribute mapping event type strings
+    (e.g., 'progress','loaded', 'error') to tuples of (Qt Signal, boolean),
+    where the boolean indicates whether to perform cleanup after handling that event.
+    Call `start_worker(worker_cls, *worker_args)` to launch the worker.
+
+    Args:
+        model: The data model instance to be used by the worker.
+        logger: Logger instance for logging progress and errors.
+        parent: Optional QObject parent for proper Qt object ownership.
+
+    Example usage in a subclass:
+        self._signal_map = {
+            "progress": (self.progress_signal, False),
+            "loaded": (self.loaded_signal, True),
+            "error": (self.error_signal, True),
+        }
+        self.start_worker(MyWorkerClass, arg1, arg2)
+
     """
 
     def __init__(self, model: Any, logger: Any, parent: Optional[QObject] = None) -> None:
-        """Initialize the service mediator with the model and logger."""
-        # Initialize the base class with the app_controller as parent so it is not garbage collected
+        """Initialize the service mediator.
+
+        Args:
+            model: The data model instance to be used by the worker.
+            logger: Logger instance for logging progress and errors.
+            parent: Optional QObject parent for proper Qt object ownership.
+
+        """
         super().__init__(parent)
         self.model = model
         self.logger = logger
 
-        # Initialize worker and thread to None
+        self._event_queue = None
         self._worker = None
         self._thread = None
+        self._poll_timer = None
+
+    def start_worker(self, worker_cls: type, *worker_args: Any) -> Tuple[Any, threading.Thread]:
+        """Start the given worker in a background thread and begin polling its event queue."""
+        self._event_queue = queue.Queue()
+        self._worker = worker_cls(*worker_args, logger=self.logger, event_queue=self._event_queue)
+        self._thread = threading.Thread(target=self._worker.run, daemon=True)
+        self._thread.start()
+
+        self._poll_timer = QTimer(self)
+        self._poll_timer.timeout.connect(self._poll_event_queue)
+        self._poll_timer.start(50)
+        return self._worker, self._thread
+
+    def _poll_event_queue(self) -> None:
+        """Poll the event queue for worker events and emit mapped Qt signals."""
+        while self._event_queue and not self._event_queue.empty():
+            event_type, data = self._event_queue.get()
+            signal_tuple = self._signal_map.get(event_type)
+            if signal_tuple:
+                signal, should_cleanup = signal_tuple
+                signal.emit(self, data)
+                if should_cleanup:
+                    self.cleanup_worker_thread()
+                    self._poll_timer.stop()
 
     def cleanup_worker_thread(self) -> None:
-        """Clean up the worker and its thread after completion or error.
-
-        Ensures the worker thread is properly joined and resources are released.
-        """
+        """Clean up the worker and its thread after completion or error."""
         try:
             if self._thread is not None and self._thread.is_alive() and threading.current_thread() is not self._thread:
                 self._thread.join(timeout=1)
@@ -46,111 +92,44 @@ class BaseServiceMediator(QObject):
 
 
 class IODListLoaderServiceMediator(BaseServiceMediator):
-    """Acts as a bridge between the service worker and the Qt-based application controller.
+    """Mediator for IODListLoaderWorker, bridges service worker and Qt signals."""
 
-    Manages background worker threads, listens to blinker signals from the service layer,
-    and emits Qt signals for the UI layer. This class is tightly coupled to the Qt framework and
-    acts as a bridge between the UI and the business logic.
-
-    This mediator is specific to the IODListLoaderWorker.
-    """
-
+    # Define Qt Signals with data/payload types
     iodlist_progress_signal = Signal(object, Progress)
     iodlist_loaded_signal = Signal(object, object)
     iodlist_error_signal = Signal(object, str)
 
     def __init__(self, model: Any, logger: Any, parent: Optional[QObject] = None) -> None:
-        """Initialize the service controller with the model and logger.
-
-        Connects blinker signals from the IODListLoaderWorker to Qt signals for the UI.
-        """
+        """Initialize the IODListLoaderServiceMediator."""
         super().__init__(model, logger, parent)
+        self._signal_map = {
+            "progress": (self.iodlist_progress_signal, False),
+            "loaded": (self.iodlist_loaded_signal, True),
+            "error": (self.iodlist_error_signal, True),
+        }
 
-    def start_iodlist_worker(self) -> Tuple["IODListLoaderWorker", threading.Thread]:
-        """Start the IOD list loader worker in a background thread.
-
-        Returns:
-            tuple: The worker and the thread objects.
-
-        """
-        # Create a thread-safe queue for communication
-        self._event_queue = queue.Queue()
-        self._worker = IODListLoaderWorker(self.model, logger=self.logger, event_queue=self._event_queue)
-        self._thread = threading.Thread(target=self._worker.run, daemon=True)
-        self._thread.start()
-
-        # Start a QTimer to poll the queue for events
-        self._poll_timer = QTimer(self)
-        self._poll_timer.timeout.connect(self._poll_event_queue)
-        self._poll_timer.start(50)  # Poll every 50ms
-
-        return self._worker, self._thread
-
-    def _on_iodlist_progress(self, sender: object = None, progress: Progress = None) -> None:
-        """Translate blinker progress signal (receives a Progress object) to Qt signal."""
-        if progress is not None:
-            self.iodlist_progress_signal.emit(sender, progress)
-
-    def _on_iodlist_loaded(self, sender: object, iod_list: object) -> None:
-        """Translate blinker loaded signal to Qt signal."""
-        self.iodlist_loaded_signal.emit(sender, iod_list)
-        self.cleanup_worker_thread()
-
-    def _on_iodlist_error(self, sender: object, message: str) -> None:
-        """Translate blinker error signal to Qt signal."""
-        self.iodlist_error_signal.emit(sender, message)
-        self.cleanup_worker_thread()
-
-    def _poll_event_queue(self) -> None:
-        """Poll the event queue for worker events and emit Qt signals."""
-        while not self._event_queue.empty():
-            event_type, data = self._event_queue.get()
-            if event_type == "progress":
-                self.iodlist_progress_signal.emit(self, data)
-            elif event_type == "loaded":
-                self.iodlist_loaded_signal.emit(self, data)
-                self.cleanup_worker_thread()
-                self._poll_timer.stop()
-            elif event_type == "error":
-                self.iodlist_error_signal.emit(self, data)
-                self.cleanup_worker_thread()
-                self._poll_timer.stop()
+    def start_iodlist_worker(self) -> Tuple[IODListLoaderWorker, threading.Thread]:
+        """Start the IOD list loader worker in a background thread."""
+        return self.start_worker(IODListLoaderWorker, self.model)
 
 
 class IODModelLoaderServiceMediator(BaseServiceMediator):
-    """Mediator for loading a single IOD model in a background thread."""
+    """Mediator for IODModelLoaderWorker, bridges service worker and Qt signals."""
 
+    # Define Qt Signals with data/payload types
     iodmodel_progress_signal = Signal(object, Progress)
     iodmodel_loaded_signal = Signal(object, object)
     iodmodel_error_signal = Signal(object, str)
 
     def __init__(self, model: Any, logger: Any, parent: Optional[QObject] = None) -> None:
-        """Initialize the service mediator for loading a single IOD model."""
+        """Initialize the IODModelLoaderServiceMediator."""
         super().__init__(model, logger, parent)
+        self._signal_map = {
+            "progress": (self.iodmodel_progress_signal, False),
+            "loaded": (self.iodmodel_loaded_signal, True),
+            "error": (self.iodmodel_error_signal, True),
+        }
 
-    def start_iodmodel_worker(self, table_id: str):
+    def start_iodmodel_worker(self, table_id: str) -> Tuple[IODModelLoaderWorker, threading.Thread]:
         """Start the IOD model loader worker in a background thread."""
-        self._event_queue = queue.Queue()
-        self._worker = IODModelLoaderWorker(self.model, table_id, logger=self.logger, event_queue=self._event_queue)
-        self._thread = threading.Thread(target=self._worker.run, daemon=True)
-        self._thread.start()
-
-        self._poll_timer = QTimer(self)
-        self._poll_timer.timeout.connect(self._poll_event_queue)
-        self._poll_timer.start(50)
-
-        return self._worker, self._thread
-
-    def _poll_event_queue(self):
-        while not self._event_queue.empty():
-            event_type, data = self._event_queue.get()
-            if event_type == "progress":
-                self.iodmodel_progress_signal.emit(self, data)
-            elif event_type == "loaded":
-                self.iodmodel_loaded_signal.emit(self, data)
-                self.cleanup_worker_thread()
-                self._poll_timer.stop()
-            elif event_type == "error":
-                self.iodmodel_error_signal.emit(self, data)
-                self.cleanup_worker_thread()
-                self._poll_timer.stop()
+        return self.start_worker(IODModelLoaderWorker, self.model, table_id)

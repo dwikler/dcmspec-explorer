@@ -2,9 +2,9 @@
 
 import threading
 
-from anytree import PreOrderIter
+from anytree import Node, PreOrderIter
 
-from PySide6.QtCore import Qt, QTimer, QObject
+from PySide6.QtCore import Qt, QTimer, QObject, QModelIndex, QUrl
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 
 from dcmspec.progress import Progress
@@ -97,7 +97,7 @@ class AppController(QObject):
         self.service.iodlist_loaded_signal.connect(self._handle_iodlist_loaded, Qt.QueuedConnection)
         self.service.iodlist_error_signal.connect(self._handle_iodlist_error, Qt.QueuedConnection)
 
-    def _on_treeview_item_clicked(self, index):
+    def _on_treeview_item_clicked(self, index: QModelIndex) -> None:
         """Handle selection of a treeview item."""
         model = index.model()
         if not model:
@@ -123,7 +123,9 @@ class AppController(QObject):
             # third-level (Attribute)
             self._handle_attribute_item_clicked(selected_item_node_path)
 
-    def _handle_iod_item_clicked(self, index, selected_item_name, selected_item_kind):
+    def _handle_iod_item_clicked(
+        self, index: QModelIndex, selected_item_name: QStandardItem, selected_item_kind: QStandardItem
+    ) -> None:
         """Handle click on a top-level (IOD) item."""
         # Update contents of the details panel
         table_id = selected_item_name.data(Qt.UserRole) if selected_item_name else None
@@ -163,7 +165,7 @@ class AppController(QObject):
         # Set expand property for the selected iod item in the view (will be effective when item will be populated)
         self.view.ui.iodTreeView.expand(index)
 
-    def _handle_module_item_clicked(self, selected_item_path):
+    def _handle_module_item_clicked(self, selected_item_path: str) -> None:
         """Handle click on a second-level (Module) item."""
         # Get attribute details from the model using only the node_path
         details = self.model.get_node_details(selected_item_path)
@@ -182,7 +184,7 @@ class AppController(QObject):
             html = f"""<h1>{selected_item_path} Module</h1>"""
         self.view.set_details_html(html)
 
-    def _handle_attribute_item_clicked(self, selected_item_path):
+    def _handle_attribute_item_clicked(self, selected_item_path: str) -> None:
         """Handle click on a third-level or deeper (Attribute) item."""
         # Get attribute details from the model using only the node_path
         details = self.model.get_node_details(selected_item_path)
@@ -237,7 +239,7 @@ class AppController(QObject):
         if hasattr(self, "progress_dialog") and self.progress_dialog:
             self.progress_dialog.update_step(status, percent)
 
-    def _handle_iodmodel_loaded(self, sender: object, iod_model: object, parent_item) -> None:
+    def _handle_iodmodel_loaded(self, sender: object, iod_model: object, parent_item: QStandardItem) -> None:
         if iod_model and hasattr(iod_model, "content"):
             # Attach the loaded IOD model's content to the model's tree
             table_id = parent_item.data(Qt.UserRole)
@@ -261,7 +263,7 @@ class AppController(QObject):
         self.view.show_error(message)
         self.view.update_status_bar(message="Error loading IOD specification.")
 
-    def _on_details_link_clicked(self, url):
+    def _on_details_link_clicked(self, url: QUrl) -> None:
         """Handle clicks on links in the detailsTextBrowser."""
         url_str = url.toString()
         if (url.scheme() == "" and url.host() == "" and url.fragment()) or url_str.startswith("#"):
@@ -300,7 +302,7 @@ class AppController(QObject):
 
         return model
 
-    def _populate_qt_tree_model_item(self, parent_item, content):
+    def _populate_qt_tree_model_item(self, parent_item: QStandardItem, content: Node) -> None:
         """Populate the tree with IOD structure from the model content using AnyTree traversal."""
         if not content:
             return
