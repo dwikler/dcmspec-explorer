@@ -120,7 +120,8 @@ class Ui_MainWindow(object):
 
         self.detailsTextBrowser = QTextBrowser(self.detailsArea)
         self.detailsTextBrowser.setObjectName(u"detailsTextBrowser")
-        self.detailsTextBrowser.setOpenExternalLinks(True)
+        self.detailsTextBrowser.setOpenExternalLinks(False)
+        self.detailsTextBrowser.setOpenLinks(False)
 
         self.verticalLayout_2.addWidget(self.detailsTextBrowser)
 

@@ -72,6 +72,11 @@ class AppController(QObject):
 
         # Connect UI elements to handlers
         self.view.ui.iodTreeView.clicked.connect(self._on_treeview_item_clicked)
+        self.view.ui.detailsTextBrowser.anchorClicked.connect(self._on_details_link_clicked)
+
+    def run(self) -> None:
+        """Show the main application window and start the user interface."""
+        self.view.show()
 
     def initialize_treeview(self) -> None:
         """Initialize the treeview with list of IODs.
@@ -256,9 +261,13 @@ class AppController(QObject):
         self.view.show_error(message)
         self.view.update_status_bar(message="Error loading IOD specification.")
 
-    def run(self) -> None:
-        """Show the main application window and start the user interface."""
-        self.view.show()
+    def _on_details_link_clicked(self, url):
+        """Handle clicks on links in the detailsTextBrowser."""
+        url_str = url.toString()
+        if (url.scheme() == "" and url.host() == "" and url.fragment()) or url_str.startswith("#"):
+            self.view.show_anchor_link_warning_dialog(url_str)
+        else:
+            self.view.show_url_link_warning_dialog(url_str)
 
     def _populate_qt_tree_model_top_level(
         self, iod_list: list[tuple[str, str, str, str]], favorites_manager: object = None

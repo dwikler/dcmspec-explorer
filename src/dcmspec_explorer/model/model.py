@@ -256,18 +256,14 @@ class Model:
         if iod_node and iod_content:
             iod_content.parent = iod_node
 
-    def get_node_details(self, node_path):
-        """Return all attributes of an Anytree node given its full path in the model.
-
-        This method locates the node in the IOD tree using the provided node_path,
-        and returns its attributes as a dictionary. If the node is not found, returns None.
+    def get_node_by_path(self, node_path):
+        """Return the AnyTree node given its full path in the model.
 
         Args:
             node_path (str): The full path to the node (e.g., "IOD List/Some IOD/Some Module/Some Attribute").
 
         Returns:
-            dict: The node's attributes including anytree metadata.
-            The consumer (controller/view) should select which attributes to display.
+            AnyTree node or None if not found.
 
         """
         if not self._iod_root or not node_path:
@@ -282,4 +278,21 @@ class Model:
                 return None
 
         # Return the node's attributes as a dict
-        return node.__dict__
+        return node
+
+    def get_node_details(self, node_path):
+        """Return all attributes of an Anytree node given its full path in the model.
+
+        This method locates the node in the IOD tree using the provided node_path,
+        and returns its attributes as a dictionary. If the node is not found, returns None.
+
+        Args:
+            node_path (str): The full path to the node (e.g., "IOD List/Some IOD/Some Module/Some Attribute").
+
+        Returns:
+            dict: The node's attributes including anytree metadata.
+            The consumer (controller/view) should select which attributes to display.
+
+        """
+        node = self.get_node_by_path(node_path)
+        return None if node is None else node.__dict__
