@@ -43,10 +43,10 @@ class Ui_MainWindow(object):
         self.controlArea.setSizePolicy(sizePolicy)
         self.horizontalLayout = QHBoxLayout(self.controlArea)
         self.horizontalLayout.setObjectName(u"horizontalLayout")
-        self.showAllPushButton = QPushButton(self.controlArea)
-        self.showAllPushButton.setObjectName(u"showAllPushButton")
+        self.reloadPushButton = QPushButton(self.controlArea)
+        self.reloadPushButton.setObjectName(u"reloadPushButton")
 
-        self.horizontalLayout.addWidget(self.showAllPushButton)
+        self.horizontalLayout.addWidget(self.reloadPushButton)
 
         self.searchLineEdit = QLineEdit(self.controlArea)
         self.searchLineEdit.setObjectName(u"searchLineEdit")
@@ -66,10 +66,10 @@ class Ui_MainWindow(object):
 
         self.horizontalLayout.addWidget(self.versionLabel)
 
-        self.reloadPushButton = QPushButton(self.controlArea)
-        self.reloadPushButton.setObjectName(u"reloadPushButton")
+        self.showAllPushButton = QPushButton(self.controlArea)
+        self.showAllPushButton.setObjectName(u"showAllPushButton")
 
-        self.horizontalLayout.addWidget(self.reloadPushButton)
+        self.horizontalLayout.addWidget(self.showAllPushButton)
 
 
         self.verticalLayout_3.addWidget(self.controlArea)
@@ -100,6 +100,8 @@ class Ui_MainWindow(object):
         self.iodTreeView = QTreeView(self.iodlistarea)
         self.iodTreeView.setObjectName(u"iodTreeView")
         self.iodTreeView.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.iodTreeView.setSortingEnabled(False)
+        self.iodTreeView.header().setProperty(u"showSortIndicator", True)
 
         self.verticalLayout.addWidget(self.iodTreeView)
 
@@ -132,7 +134,7 @@ class Ui_MainWindow(object):
         MainWindow.setCentralWidget(self.centralwidget)
         self.menubar = QMenuBar(MainWindow)
         self.menubar.setObjectName(u"menubar")
-        self.menubar.setGeometry(QRect(0, 0, 1400, 43))
+        self.menubar.setGeometry(QRect(0, 0, 1400, 24))
         MainWindow.setMenuBar(self.menubar)
         self.statusbar = QStatusBar(MainWindow)
         self.statusbar.setObjectName(u"statusbar")
@@ -145,10 +147,10 @@ class Ui_MainWindow(object):
 
     def retranslateUi(self, MainWindow):
         MainWindow.setWindowTitle(QCoreApplication.translate("MainWindow", u"DCMspec Explorer", None))
-        self.showAllPushButton.setText(QCoreApplication.translate("MainWindow", u"Reload", None))
-        self.searchLineEdit.setPlaceholderText(QCoreApplication.translate("MainWindow", u"Search...", None))
-        self.versionLabel.setText(QCoreApplication.translate("MainWindow", u"Version", None))
         self.reloadPushButton.setText(QCoreApplication.translate("MainWindow", u"Show All", None))
+        self.searchLineEdit.setPlaceholderText(QCoreApplication.translate("MainWindow", u"Search Name or Kind (case-sensitive)...", None))
+        self.versionLabel.setText(QCoreApplication.translate("MainWindow", u"Version", None))
+        self.showAllPushButton.setText(QCoreApplication.translate("MainWindow", u"Reload", None))
         self.iodLabel.setText(QCoreApplication.translate("MainWindow", u"IOD List", None))
         self.detailsLabel.setText(QCoreApplication.translate("MainWindow", u"Details", None))
     # retranslateUi

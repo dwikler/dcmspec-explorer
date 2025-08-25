@@ -1,20 +1,29 @@
 """Controller class for the DCMspec Explorer application."""
 
 import threading
+from typing import Any, Optional
+import warnings
+import contextlib
 
-from anytree import Node, PreOrderIter
 
 from PySide6.QtCore import Qt, QTimer, QObject, QModelIndex, QUrl
-from PySide6.QtGui import QStandardItemModel, QStandardItem
+from PySide6.QtGui import QStandardItem
 
 from dcmspec.progress import Progress
 
 from dcmspec_explorer.app_config import load_app_config, setup_logger
 from dcmspec_explorer.model.model import DICOM_TYPE_MAP, DICOM_USAGE_MAP
 from dcmspec_explorer.model.model import Model
+from dcmspec_explorer.model.model import IODEntry
 from dcmspec_explorer.services.service_mediator import IODListLoaderServiceMediator, IODModelLoaderServiceMediator
 from dcmspec_explorer.view.load_iod_dialog import LoadIODDialog
 from dcmspec_explorer.view.main_window import MainWindow
+from dcmspec_explorer.controller.iod_treeview_adapter import (
+    IODTreeViewModelAdapter,
+    TABLE_ID_ROLE,
+    TABLE_URL_ROLE,
+    NODE_PATH_ROLE,
+)
 
 
 class AppController(QObject):
@@ -71,8 +80,16 @@ class AppController(QObject):
         QTimer.singleShot(0, self.initialize_treeview)
 
         # Connect UI elements to handlers
-        self.view.ui.iodTreeView.clicked.connect(self._on_treeview_item_clicked)
+        self.view.header_clicked.connect(self._on_treeview_header_clicked)
+        self.view.search_text_changed.connect(self._on_search_text_changed)
+        self.view.iod_treeview_item_selected.connect(self._on_treeview_item_clicked)
         self.view.ui.detailsTextBrowser.anchorClicked.connect(self._on_details_link_clicked)
+
+        # Initialize sorting state
+        self.sort_column: Optional[int] = None  # No sorting on first load
+        self.sort_reverse: bool = False
+
+        self._iodmodel_loaded_call_count = 0
 
     def run(self) -> None:
         """Show the main application window and start the user interface."""
@@ -97,18 +114,21 @@ class AppController(QObject):
         self.service.iodlist_loaded_signal.connect(self._handle_iodlist_loaded, Qt.QueuedConnection)
         self.service.iodlist_error_signal.connect(self._handle_iodlist_error, Qt.QueuedConnection)
 
+    def _on_search_text_changed(self, text: str) -> None:
+        """Handle search box text change and update filtering."""
+        self.apply_filter_and_sort()
+
     def _on_treeview_item_clicked(self, index: QModelIndex) -> None:
         """Handle selection of a treeview item."""
         model = index.model()
         if not model:
             return
 
-        # Retrieve values from the selected treeview item columns
         selected_item_name = model.itemFromIndex(index.siblingAtColumn(0))
         selected_item_kind = model.itemFromIndex(index.siblingAtColumn(1))
 
         # Retrieve the node path from the selected item data
-        selected_item_node_path = selected_item_name.data(Qt.UserRole) if selected_item_name else None
+        selected_item_node_path = selected_item_name.data(NODE_PATH_ROLE) if selected_item_name else None
 
         # Check the clicked item level and take appropriate action
         if index.parent().isValid() is False:
@@ -123,13 +143,34 @@ class AppController(QObject):
             # third-level (Attribute)
             self._handle_attribute_item_clicked(selected_item_node_path)
 
+    def _safe_disconnect(self, *signals: Any) -> None:
+        """Safely disconnect all slots from the given Qt signals, suppressing warnings.
+
+        In PySide6/Qt, connecting the same slot to a signal multiple times results in multiple calls.
+        This helper ensures that all previous connections are removed before reconnecting, which is
+        especially important for signals connected dynamically in response to user actions.
+
+        Args:
+            signals: One or more Qt signal objects to disconnect.
+
+        Note:
+            PySide6 does not deduplicate signal connections automatically. This method avoids
+            duplicate slot calls and suppresses harmless RuntimeWarnings if a signal is already disconnected.
+
+        """
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            for sig in signals:
+                with contextlib.suppress(TypeError):
+                    sig.disconnect()
+
     def _handle_iod_item_clicked(
         self, index: QModelIndex, selected_item_name: QStandardItem, selected_item_kind: QStandardItem
     ) -> None:
         """Handle click on a top-level (IOD) item."""
         # Update contents of the details panel
-        table_id = selected_item_name.data(Qt.UserRole) if selected_item_name else None
-        table_url = selected_item_name.data(Qt.UserRole + 1) if selected_item_name else None
+        table_id = selected_item_name.data(TABLE_ID_ROLE) if selected_item_name else None
+        table_url = selected_item_name.data(TABLE_URL_ROLE) if selected_item_name else None
         table_ref = table_id.split("table_", 1)[-1] if table_id and table_id.startswith("table_") else table_id
         html = f"""<h1>{selected_item_name.text()} IOD</h1>
                 <p><span class="label">IOD Kind:</span> {selected_item_kind.text() if selected_item_kind else ""}</p>
@@ -150,13 +191,21 @@ class AppController(QObject):
         # Start the IOD model loader worker in a background thread
         self._iod_model_worker, self._iod_model_thread = self.iod_model_service.start_iodmodel_worker(table_id)
 
+        # Disconnect previous signal connections to avoid duplicate handlers
+        self._safe_disconnect(
+            self.iod_model_service.iodmodel_progress_signal,
+            self.iod_model_service.iodmodel_loaded_signal,
+            self.iod_model_service.iodmodel_error_signal,
+        )
+
         # Connect signals to handlers for progress, loaded, and error
         self.iod_model_service.iodmodel_progress_signal.connect(self._handle_iodmodel_progress, Qt.QueuedConnection)
+        # table_id is captured at lambda creation time as it may be out-of-scope by the time the lambda is executed
         self.iod_model_service.iodmodel_loaded_signal.connect(
-            lambda sender, iod_model: self._handle_iodmodel_loaded(
+            lambda sender, iod_model, table_id=table_id: self._handle_iodmodel_loaded(
                 sender,
                 iod_model,
-                selected_item_name,  # add selected_item_name to received signal parameters
+                table_id,  # pass selected item table_id to recover item selection in rebuilt treeview
             ),
             Qt.QueuedConnection,
         )
@@ -211,14 +260,17 @@ class AppController(QObject):
             self.logger.debug(f"Progress update: {percent}%")
             self.view.update_status_bar(f"Loading IOD modules... {percent}%")
 
-    def _handle_iodlist_loaded(self, sender: object, iod_list: object) -> None:
-        # Populate the tree model with the loaded IODs
-        qt_tree_model = self._populate_qt_tree_model_top_level(iod_list)
-        self.view.update_treeview(qt_tree_model)
+    def _handle_iodlist_loaded(self, sender: object, iod_entry_list: list[IODEntry]) -> None:
+        # Initialize the mapping of already loaded iods (AnyTree node content added to treeview) by their table_id
+        self._iod_children_loaded = {}
+
+        # Populate the tree model with the loaded IODs applying filters and sorting
+        self.apply_filter_and_sort(iod_entry_list=iod_entry_list)
+
         # Update the version label with the model's version
         if self.model.version:
             self.view.ui.versionLabel.setText(f"Version: {self.model.version}")
-        self.view.update_status_bar(message=f"Listed {len(iod_list)} IODs.")
+        self.view.update_status_bar(message=f"Listed {len(iod_entry_list)} IODs.")
 
     def _handle_iodlist_error(self, sender: object, message: str) -> None:
         self.logger.error(f"Error signal received from {sender}: {message}")
@@ -239,13 +291,22 @@ class AppController(QObject):
         if hasattr(self, "progress_dialog") and self.progress_dialog:
             self.progress_dialog.update_step(status, percent)
 
-    def _handle_iodmodel_loaded(self, sender: object, iod_model: object, parent_item: QStandardItem) -> None:
+    def _handle_iodmodel_loaded(self, sender: object, iod_model: object, table_id: str) -> None:
         if iod_model and hasattr(iod_model, "content"):
-            # Attach the loaded IOD model's content to the model's tree
-            table_id = parent_item.data(Qt.UserRole)
+            # Add the loaded IOD content to the model
             self.model.add_iod_spec_content(table_id, iod_model.content)
 
-            self._populate_qt_tree_model_item(parent_item, iod_model.content)
+            # Remember that this IOD's children are loaded
+            if not hasattr(self, "_iod_children_loaded"):
+                self._iod_children_loaded = {}
+            self._iod_children_loaded[table_id] = iod_model.content
+
+            # Find the parent item in the current treeview model
+            model = self.view.ui.iodTreeView.model()
+            success = IODTreeViewModelAdapter.populate_iod_entry_children(model, table_id, iod_model.content)
+            if not success:
+                self.view.show_error("The selected IOD is no longer visible. Please clear the filter and try again.")
+
             # Hide progress dialog and re-enable treeview
             if hasattr(self, "progress_dialog") and self.progress_dialog:
                 self.progress_dialog.accept()
@@ -271,82 +332,56 @@ class AppController(QObject):
         else:
             self.view.show_url_link_warning_dialog(url_str)
 
-    def _populate_qt_tree_model_top_level(
-        self, iod_list: list[tuple[str, str, str, str]], favorites_manager: object = None
-    ) -> QStandardItemModel:
-        """Convert a list of IOD module tuples into a QStandardItemModel for use with a QTreeView.
+    def apply_filter_and_sort(self, iod_entry_list: Optional[list[IODEntry]] = None) -> None:
+        """Apply current search filter and sort to the IOD list and update the treeview."""
+        # Save current selection (by table_id)
+        selection_model = self.view.ui.iodTreeView.selectionModel()
+        selected_table_id = None
+        if selection_model and selection_model.hasSelection():
+            index = selection_model.currentIndex()
+            model = index.model()
+            selected_item = model.itemFromIndex(index.siblingAtColumn(0))
+            if selected_item:
+                selected_table_id = selected_item.data(TABLE_ID_ROLE)
 
-        Args:
-            iod_list (List[Tuple[str, str, str, str]] or None): List of IODs as (name, table_id, href, iod_type).
-            favorites_manager: Instance to check if a table_id is a favorite.
+        # Use the provided IODEntry list if given, otherwise fall back to model property
+        iod_entry_list = iod_entry_list if iod_entry_list is not None else self.model.iod_list
+        search_text = self.view.ui.searchLineEdit.text()
+        sort_column = self.sort_column
+        sort_reverse = self.sort_reverse
+        loaded_children = getattr(self, "_iod_children_loaded", {})
 
-        Returns:
-            QStandardItemModel: The model ready to be set on a QTreeView.
+        qt_tree_model, selected_row = IODTreeViewModelAdapter.build_treeview_model(
+            iod_entry_list=iod_entry_list,
+            search_text=search_text,
+            sort_column=sort_column,
+            sort_reverse=sort_reverse,
+            loaded_children=loaded_children,
+            selected_table_id=selected_table_id,
+        )
 
-        """
-        model = QStandardItemModel()
-        model.setHorizontalHeaderLabels(["Name", "Kind", "", "♥"])
+        self.view.update_treeview(qt_tree_model)
 
-        item_favorite_flag = ""
-        for iod_name, table_id, table_url, iod_kind in iod_list:
-            item_name = QStandardItem(iod_name)
-            item_kind = QStandardItem(iod_kind)
-            item_usage = QStandardItem("")  # Usage column is empty for now
-            item_favorite_flag = QStandardItem(item_favorite_flag)
+        # Restore selection if possible
+        if selected_row is not None:
+            item = qt_tree_model.item(selected_row, 0)
+            index = qt_tree_model.indexFromItem(item)
+            self.view.ui.iodTreeView.setCurrentIndex(index)
 
-            # Store table_id and iod_type as data for later retrieval
-            item_name.setData(table_id, role=Qt.UserRole)
-            item_name.setData(table_url, role=Qt.UserRole + 1)
-
-            model.appendRow([item_name, item_kind, item_usage, item_favorite_flag])
-
-        return model
-
-    def _populate_qt_tree_model_item(self, parent_item: QStandardItem, content: Node) -> None:
-        """Populate the tree with IOD structure from the model content using AnyTree traversal."""
-        if not content:
+    def _on_treeview_header_clicked(self, logical_index: int) -> None:
+        """Handle clicks on the treeview column headers for sorting."""
+        # Only allow sorting on Name (0) and Kind (1)
+        if logical_index not in (0, 1):
+            self.logger.info("Sorting is only supported on Name and Kind columns.")
             return
 
-        tree_items = {}  # Map from node to QStandardItem for building hierarchy
+        if self.sort_column == logical_index:
+            self.sort_reverse = not self.sort_reverse  # descending if True, ascending if False
+        else:
+            self.sort_column = logical_index
+            self.sort_reverse = False
 
-        for node in PreOrderIter(content):
-            if node == content:
-                continue  # Skip the root content node
+        # Update the sort indicator in the view
+        self.view.update_treeview_sort_indicator(self.sort_column, self.sort_reverse)
 
-            # Determine the parent tree item
-            if node.parent == content:
-                parent_tree_item = parent_item
-            else:
-                parent_tree_item = tree_items.get(node.parent, parent_item)
-
-            # Determine node type and display text
-            if hasattr(node, "module"):
-                module_name = getattr(node, "module", "Unknown Module")
-                display_text = module_name
-                node_type = "Module"
-                usage = getattr(node, "usage", "")[:1] if hasattr(node, "usage") else ""
-            elif hasattr(node, "elem_name"):
-                attr_name = getattr(node, "elem_name", "Unknown Attribute")
-                attr_tag = getattr(node, "elem_tag", "")
-                elem_type = getattr(node, "elem_type", "")
-                display_text = f"{attr_tag} {attr_name}" if attr_tag else attr_name
-                node_type = "Attribute"
-                usage = elem_type
-            else:
-                display_text = str(getattr(node, "name", "Unknown Node"))
-                node_type = "Unknown"
-                usage = ""
-
-            # Create QStandardItems for each column
-            name = QStandardItem(display_text)
-            kind = QStandardItem(node_type)
-            usage = QStandardItem(usage)
-            favorite_flag = QStandardItem("")
-
-            # Optionally, store node path or other data for later retrieval
-            node_path = "/".join([str(n.name) for n in node.path])
-            name.setData(node_path, role=Qt.UserRole)
-
-            # Append the row to the parent tree item
-            parent_tree_item.appendRow([name, kind, usage, favorite_flag])
-            tree_items[node] = name
+        self.apply_filter_and_sort()
