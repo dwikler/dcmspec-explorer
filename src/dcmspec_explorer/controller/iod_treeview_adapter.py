@@ -8,6 +8,25 @@ from PySide6.QtGui import QStandardItemModel, QStandardItem
 
 from dcmspec_explorer.model.model import IODEntry
 
+# Define mapping of column names to their indices
+COLUMN_INDEX = {
+    "name": 0,
+    "kind": 1,
+    "usage": 2,
+    "favorite": 3,
+}
+
+# Define custom roles constants for storing extra data in QStandardItem objects.
+# These roles are used to associate domain-specific data with treeview items
+# without interfering with Qt's built-in roles.
+#
+# TABLE_ID_ROLE: Used to store the unique table_id for top-level IODEntry items.
+# TABLE_URL_ROLE: Used to store the table_url for top-level IODEntry items.
+# NODE_PATH_ROLE: Used to store the Anytree node_path corresponding to the item
+TABLE_ID_ROLE = Qt.UserRole
+TABLE_URL_ROLE = Qt.UserRole + 1
+NODE_PATH_ROLE = Qt.UserRole + 2
+
 
 class IODTreeViewModelAdapter:
     """Adapt IOD data model to Qt treeview model."""
@@ -47,25 +66,27 @@ class IODTreeViewModelAdapter:
 
         # Sort if specified (no sorting at startup)
         if sort_column is not None:
-            if sort_column == 1:
+            if sort_column == COLUMN_INDEX["name"]:
+                # Sort by name
+                filtered = sorted(
+                    filtered,
+                    key=lambda iod: iod.name.lower(),
+                    reverse=sort_reverse,
+                )
+            elif sort_column == COLUMN_INDEX["kind"]:
                 # Sort by kind, then by name
                 filtered = sorted(
                     filtered,
                     key=lambda iod: (iod.kind.lower(), iod.name.lower()),
                     reverse=sort_reverse,
                 )
-            else:
-                filtered = sorted(
-                    filtered,
-                    key=lambda iod: getattr(iod, ["name", "kind", "table_url", "kind"][sort_column]).lower(),
-                    reverse=sort_reverse,
-                )
+            # No else needed as sorting on other columns is not supported
 
         model = IODTreeViewModelAdapter.populate_treeview_model_top_level(filtered)
         selected_row = None
         for row in range(model.rowCount()):
             item = model.item(row, 0)
-            table_id = item.data(Qt.UserRole)
+            table_id = item.data(TABLE_ID_ROLE)
             if loaded_children and table_id in loaded_children:
                 IODTreeViewModelAdapter.populate_treeview_model_item(item, loaded_children[table_id])
             if selected_table_id and table_id == selected_table_id:
@@ -97,12 +118,32 @@ class IODTreeViewModelAdapter:
             item_favorite_flag = QStandardItem(item_favorite_flag)
 
             # Store table_id and iod_type as data for later retrieval
-            item_name.setData(iod.table_id, role=Qt.UserRole)
-            item_name.setData(iod.table_url, role=Qt.UserRole + 1)
+            item_name.setData(iod.table_id, role=TABLE_ID_ROLE)
+            item_name.setData(iod.table_url, role=TABLE_URL_ROLE)
 
             model.appendRow([item_name, item_kind, item_usage, item_favorite_flag])
 
         return model
+
+    @staticmethod
+    def populate_iod_entry_children(tree_model: QStandardItemModel, table_id: str, content: Node) -> bool:
+        """Add children items to the IODEntry item in the treeview model.
+
+        Args:
+            tree_model (QStandardItemModel): The tree model to modify.
+            table_id (str): The table ID of the IODEntry to update.
+            content (Node): The content node to append as children.
+
+        Returns:
+            bool: True if the item was found and updated, False otherwise.
+
+        """
+        for row in range(tree_model.rowCount()):
+            item = tree_model.item(row, 0)
+            if item.data(TABLE_ID_ROLE) == table_id:
+                IODTreeViewModelAdapter.populate_treeview_model_item(item, content)
+                return True
+        return False
 
     @staticmethod
     def populate_treeview_model_item(parent_item: QStandardItem, content: Node) -> None:
@@ -148,7 +189,7 @@ class IODTreeViewModelAdapter:
 
             # Optionally, store node path or other data for later retrieval
             node_path = "/".join([str(n.name) for n in node.path])
-            name.setData(node_path, role=Qt.UserRole)
+            name.setData(node_path, role=NODE_PATH_ROLE)
 
             # Append the row to the parent tree item
             parent_tree_item.appendRow([name, kind, usage, favorite_flag])

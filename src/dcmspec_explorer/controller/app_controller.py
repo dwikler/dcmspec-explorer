@@ -1,6 +1,5 @@
 """Controller class for the DCMspec Explorer application."""
 
-import time
 import threading
 from typing import Any, Optional
 import warnings
@@ -19,7 +18,12 @@ from dcmspec_explorer.model.model import IODEntry
 from dcmspec_explorer.services.service_mediator import IODListLoaderServiceMediator, IODModelLoaderServiceMediator
 from dcmspec_explorer.view.load_iod_dialog import LoadIODDialog
 from dcmspec_explorer.view.main_window import MainWindow
-from dcmspec_explorer.controller.iod_treeview_adapter import IODTreeViewModelAdapter
+from dcmspec_explorer.controller.iod_treeview_adapter import (
+    IODTreeViewModelAdapter,
+    TABLE_ID_ROLE,
+    TABLE_URL_ROLE,
+    NODE_PATH_ROLE,
+)
 
 
 class AppController(QObject):
@@ -124,7 +128,7 @@ class AppController(QObject):
         selected_item_kind = model.itemFromIndex(index.siblingAtColumn(1))
 
         # Retrieve the node path from the selected item data
-        selected_item_node_path = selected_item_name.data(Qt.UserRole) if selected_item_name else None
+        selected_item_node_path = selected_item_name.data(NODE_PATH_ROLE) if selected_item_name else None
 
         # Check the clicked item level and take appropriate action
         if index.parent().isValid() is False:
@@ -165,8 +169,8 @@ class AppController(QObject):
     ) -> None:
         """Handle click on a top-level (IOD) item."""
         # Update contents of the details panel
-        table_id = selected_item_name.data(Qt.UserRole) if selected_item_name else None
-        table_url = selected_item_name.data(Qt.UserRole + 1) if selected_item_name else None
+        table_id = selected_item_name.data(TABLE_ID_ROLE) if selected_item_name else None
+        table_url = selected_item_name.data(TABLE_URL_ROLE) if selected_item_name else None
         table_ref = table_id.split("table_", 1)[-1] if table_id and table_id.startswith("table_") else table_id
         html = f"""<h1>{selected_item_name.text()} IOD</h1>
                 <p><span class="label">IOD Kind:</span> {selected_item_kind.text() if selected_item_kind else ""}</p>
@@ -288,10 +292,6 @@ class AppController(QObject):
             self.progress_dialog.update_step(status, percent)
 
     def _handle_iodmodel_loaded(self, sender: object, iod_model: object, table_id: str) -> None:
-        self.logger.debug(
-            f"CALL _handle_iodmodel_loaded: table_id={table_id}, "
-            f"time={time.time()}, thread={threading.current_thread().name}"
-        )
         if iod_model and hasattr(iod_model, "content"):
             # Add the loaded IOD content to the model
             self.model.add_iod_spec_content(table_id, iod_model.content)
@@ -301,34 +301,10 @@ class AppController(QObject):
                 self._iod_children_loaded = {}
             self._iod_children_loaded[table_id] = iod_model.content
 
-            # Find the parent item in the current model
+            # Find the parent item in the current treeview model
             model = self.view.ui.iodTreeView.model()
-            parent_item_in_model = None
-            for row in range(model.rowCount()):
-                item = model.item(row, 0)
-                self.logger.debug(
-                    f"Checking row {row}: item.data(Qt.UserRole)={item.data(Qt.UserRole)}, expected table_id={table_id}"
-                )
-                if item.data(Qt.UserRole) == table_id:
-                    parent_item_in_model = item
-                    self.logger.debug(f"Found parent item in model for table_id={table_id} at row {row}.")
-                    break
-
-            if parent_item_in_model is not None:
-                self.logger.debug(
-                    f"Populating children for parent_item_in_model: {parent_item_in_model.text()} (table_id={table_id})"
-                )
-                IODTreeViewModelAdapter.populate_treeview_model_item(parent_item_in_model, iod_model.content)
-            else:
-                # Debug info to help diagnose why the parent is not found
-                current_filter = self.view.ui.searchLineEdit.text()
-                model_table_ids = [model.item(row, 0).data(Qt.UserRole) for row in range(model.rowCount())]
-                self.logger.debug(
-                    f"Parent IOD not found in model. "
-                    f"table_id: {table_id}, "
-                    f"current_filter: '{current_filter}', "
-                    f"model_table_ids: {model_table_ids}"
-                )
+            success = IODTreeViewModelAdapter.populate_iod_entry_children(model, table_id, iod_model.content)
+            if not success:
                 self.view.show_error("The selected IOD is no longer visible. Please clear the filter and try again.")
 
             # Hide progress dialog and re-enable treeview
@@ -366,7 +342,7 @@ class AppController(QObject):
             model = index.model()
             selected_item = model.itemFromIndex(index.siblingAtColumn(0))
             if selected_item:
-                selected_table_id = selected_item.data(Qt.UserRole)
+                selected_table_id = selected_item.data(TABLE_ID_ROLE)
 
         # Use the provided IODEntry list if given, otherwise fall back to model property
         iod_entry_list = iod_entry_list if iod_entry_list is not None else self.model.iod_list
