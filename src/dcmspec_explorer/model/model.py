@@ -2,7 +2,7 @@
 
 import logging
 import re
-from typing import List, Tuple
+from typing import List, NamedTuple, Tuple
 from urllib.parse import urljoin
 
 from dcmspec.config import Config
@@ -32,6 +32,15 @@ DICOM_TYPE_MAP = {
 }
 
 
+class IODEntry(NamedTuple):
+    """Define an IOD entry."""
+
+    name: str
+    table_id: str
+    table_url: str
+    kind: str
+
+
 class Model:
     """Data model for DICOM specifications."""
 
@@ -51,7 +60,16 @@ class Model:
         """Return the DICOM version string for the loaded iod_list."""
         return getattr(self, "_version", None)
 
-    def load_iod_list(self, force_download: bool = False, progress_observer: ServiceProgressObserver = None):
+    @property
+    def iod_list(self) -> List[IODEntry]:
+        """Return the current IOD list as a list of IODEntry objects."""
+        if not hasattr(self, "_iod_dict") or not self._iod_dict:
+            return []
+        return [IODEntry(node.name, node.table_id, node.table_url, node.iod_kind) for node in self._iod_dict.values()]
+
+    def load_iod_list(
+        self, force_download: bool = False, progress_observer: ServiceProgressObserver = None
+    ) -> List[IODEntry]:
         """Load list of IODs from the DICOM PS3.3 List of Tables.
 
         Args:
@@ -59,23 +77,34 @@ class Model:
             progress_observer (ServiceProgressObserver): A progress observer to report progress.
 
         Returns:
-            List[Tuple[str, str, str, str]]: A list of IODs as (iod_name, table_id, href, iod_kind).
+            List[IODEntry]: A list of IODEntry objects.
 
         """
         self.logger.debug("Loading IOD list...")
 
         try:
-            iod_list, version = self._parse_iod_list_from_html(force_download, progress_observer)
+            iod_entry_list, version = self._parse_iod_list_from_html(force_download, progress_observer)
             self._version = version
-            self._iod_root, self._iod_dict = self._build_iods_model(iod_list)
-            return iod_list
+            self._iod_root, self._iod_dict = self._build_iods_model(iod_entry_list)
+            return iod_entry_list
         except Exception as e:
             error_msg = f"Failed to load DICOM specification: \n{str(e)}"
             self.logger.error(error_msg)
             raise RuntimeError(error_msg) from e
 
-    def _parse_iod_list_from_html(self, force_download, progress_observer):
-        """Download and parse the HTML, extract IOD list and version."""
+    def _parse_iod_list_from_html(
+        self, force_download: bool, progress_observer: ServiceProgressObserver
+    ) -> Tuple[List[IODEntry], str]:
+        """Download and parse the HTML, extract IOD list and version.
+
+        Args:
+            force_download (bool): If True, force download from URL instead of using cache.
+            progress_observer (ServiceProgressObserver): A progress observer to report progress.
+
+        Returns:
+            Tuple[List[IODEntry], str]: A tuple of (IODEntry list, version string).
+
+        """
         cache_file_name = "ps3.3.html"
         soup = self.doc_handler.load_document(
             cache_file_name=cache_file_name,
@@ -95,21 +124,21 @@ class Model:
             raise ValueError(error_msg)
 
         # Extract IOD list from the list of tables section
-        iod_list = self._extract_iod_list(list_of_tables)
+        iod_entry_list = self._extract_iod_list(list_of_tables)
 
-        return iod_list, version
+        return iod_entry_list, version
 
-    def _build_iods_model(self, iod_list):
+    def _build_iods_model(self, iod_entry_list: List[IODEntry]):
         """Build a tree model for IODs and a dict mapping table_id to IOD nodes.
 
         The tree structure supports later addition of modules and attributes as children of each IOD node.
         The dict allows fast lookup of IOD nodes by table_id.
 
         Args:
-            iod_list (list): List of tuples (iod_name, table_id, table_url, iod_kind).
+            iod_entry_list (List[IODEntry]): List of IODEntry objects.
 
         Returns:
-            tuple: (iod_root, iod_dict)
+            Tuple[Any, dict]: (iod_root, iod_dict)
                 iod_root: The AnyTree root node for all IODs.
                 iod_dict: Dict mapping table_id to the corresponding IOD node.
 
@@ -118,23 +147,25 @@ class Model:
 
         iod_root = Node("IOD List")
         iod_dict = {}
-        for iod_name, table_id, table_url, iod_kind in iod_list:
+        for iod in iod_entry_list:
             # Create a node for each IOD and attach it to the root
-            iod_node = Node(iod_name, parent=iod_root, table_id=table_id, table_url=table_url, iod_kind=iod_kind)
+            iod_node = Node(
+                iod.name, parent=iod_root, table_id=iod.table_id, table_url=iod.table_url, iod_kind=iod.kind
+            )
             # Store the node in the dict for fast lookup by table_id
-            iod_dict[table_id] = iod_node
+            iod_dict[iod.table_id] = iod_node
         return iod_root, iod_dict
 
-    def _extract_iod_list(self, list_of_tables) -> List[Tuple[str, str, str, str]]:
+    def _extract_iod_list(self, list_of_tables) -> List[IODEntry]:
         """Extract list of IODs from the list of tables section.
 
         Returns:
-            List of tuples (iod_name, table_id, href, iod_kind)
+            List[IODEntry]: A list of IODEntry objects.
 
         """
         # Compute the base URL by stripping the filename from part3_toc_url
         base_url = self.part3_toc_url.rsplit("/", 1)[0] + "/"
-        iods = []
+        iod_entry_list = []
 
         # Find all dt elements
         dt_elements = list_of_tables.find_all("dt")
@@ -173,9 +204,9 @@ class Model:
                     else:
                         iod_kind = "Other"
 
-                    iods.append((iod_name, table_id, table_url, iod_kind))
+                    iod_entry_list.append(IODEntry(iod_name, table_id, table_url, iod_kind))
 
-        return iods
+        return iod_entry_list
 
     def load_iod_model(self, table_id: str, logger: logging.Logger, progress_observer: ServiceProgressObserver = None):
         """Load the IOD model for the given table_id using the IODSpecBuilder API.

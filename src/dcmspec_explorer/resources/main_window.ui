@@ -40,9 +40,9 @@
       </property>
       <layout class="QHBoxLayout" name="horizontalLayout" stretch="0,0,0,0,0">
        <item>
-        <widget class="QPushButton" name="showAllPushButton">
+        <widget class="QPushButton" name="reloadPushButton">
          <property name="text">
-          <string>Reload</string>
+          <string>Show All</string>
          </property>
         </widget>
        </item>
@@ -58,7 +58,7 @@
           </sizepolicy>
          </property>
          <property name="placeholderText">
-          <string>Search...</string>
+          <string>Search Name or Kind (case-sensitive)...</string>
          </property>
          <property name="clearButtonEnabled">
           <bool>true</bool>
@@ -86,9 +86,9 @@
         </widget>
        </item>
        <item>
-        <widget class="QPushButton" name="reloadPushButton">
+        <widget class="QPushButton" name="showAllPushButton">
          <property name="text">
-          <string>Show All</string>
+          <string>Reload</string>
          </property>
         </widget>
        </item>
@@ -132,6 +132,12 @@
           <property name="editTriggers">
            <set>QAbstractItemView::EditTrigger::NoEditTriggers</set>
           </property>
+          <property name="sortingEnabled">
+           <bool>false</bool>
+          </property>
+          <attribute name="headerShowSortIndicator" stdset="0">
+           <bool>true</bool>
+          </attribute>
          </widget>
         </item>
        </layout>
@@ -173,7 +179,7 @@
      <x>0</x>
      <y>0</y>
      <width>1400</width>
-     <height>43</height>
+     <height>24</height>
     </rect>
    </property>
   </widget>

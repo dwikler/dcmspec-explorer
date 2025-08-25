@@ -33,8 +33,8 @@ class IODListLoaderWorker:
         progress_observer = ServiceProgressObserver(self.event_queue)
 
         try:
-            iod_modules = self.model.load_iod_list(progress_observer=progress_observer)
-            self.event_queue.put(("loaded", iod_modules))
+            iod_entry_list = self.model.load_iod_list(progress_observer=progress_observer)
+            self.event_queue.put(("loaded", iod_entry_list))
         except Exception as e:
             self.event_queue.put(("error", str(e)))
 
