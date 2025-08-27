@@ -12,12 +12,17 @@ from PySide6.QtGui import QStandardItem
 from dcmspec.progress import Progress
 
 from dcmspec_explorer.app_config import load_app_config, setup_logger
+
 from dcmspec_explorer.model.model import DICOM_TYPE_MAP, DICOM_USAGE_MAP
 from dcmspec_explorer.model.model import Model
 from dcmspec_explorer.model.model import IODEntry
+
 from dcmspec_explorer.services.service_mediator import IODListLoaderServiceMediator, IODModelLoaderServiceMediator
+from dcmspec_explorer.services.favorites_manager import FavoritesManager
+
 from dcmspec_explorer.view.load_iod_dialog import LoadIODDialog
 from dcmspec_explorer.view.main_window import MainWindow
+
 from dcmspec_explorer.controller.iod_treeview_adapter import (
     IODTreeViewModelAdapter,
     TABLE_ID_ROLE,
@@ -71,6 +76,11 @@ class AppController(QObject):
         # Create model and view
         self.model = Model(self.config, self.logger)
         self.view = MainWindow()
+
+        # Initialize the favorites manager
+        self.favorites_manager = FavoritesManager(self.config, self.logger)
+        # Initialize the treeview adapter with favorites manager
+        self.treeview_adapter = IODTreeViewModelAdapter(favorites_manager=self.favorites_manager)
 
         # Initialize the service mediators
         self.service = IODListLoaderServiceMediator(self.model, self.logger, parent=self)
@@ -351,7 +361,7 @@ class AppController(QObject):
         sort_reverse = self.sort_reverse
         loaded_children = getattr(self, "_iod_children_loaded", {})
 
-        qt_tree_model, selected_row = IODTreeViewModelAdapter.build_treeview_model(
+        qt_tree_model, selected_row = self.treeview_adapter.build_treeview_model(
             iod_entry_list=iod_entry_list,
             search_text=search_text,
             sort_column=sort_column,
