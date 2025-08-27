@@ -82,6 +82,9 @@ class AppController(QObject):
         self.favorites_manager = FavoritesManager(self.config, self.logger)
         # Initialize the treeview adapter with favorites manager
         self.treeview_adapter = IODTreeViewModelAdapter(favorites_manager=self.favorites_manager)
+        # Initialize the favorites view state
+        self.show_favorites_only = False
+        self.view.set_show_favorites_button_label(self.show_favorites_only)
 
         # Initialize the service mediators
         self.service = IODListLoaderServiceMediator(self.model, self.logger, parent=self)
@@ -96,6 +99,7 @@ class AppController(QObject):
         self.view.iod_treeview_item_selected.connect(self._on_treeview_item_clicked)
         self.view.iod_treeview_right_click.connect(self._on_treeview_right_click)
         self.view.ui.detailsTextBrowser.anchorClicked.connect(self._on_details_link_clicked)
+        self.view.toggle_favorites_clicked.connect(self._on_toggle_favorites_clicked)
 
         # Initialize sorting state
         self.sort_column: Optional[int] = None  # No sorting on first load
@@ -128,6 +132,12 @@ class AppController(QObject):
 
     def _on_search_text_changed(self, text: str) -> None:
         """Handle search box text change and update filtering."""
+        self.apply_filter_and_sort()
+
+    def _on_toggle_favorites_clicked(self):
+        """Toggle between showing all IODs and only favorites."""
+        self.show_favorites_only = not self.show_favorites_only
+        self.view.set_show_favorites_button_label(self.show_favorites_only)
         self.apply_filter_and_sort()
 
     def _on_treeview_item_clicked(self, index: QModelIndex) -> None:
@@ -379,15 +389,20 @@ class AppController(QObject):
             if selected_item:
                 selected_table_id = selected_item.data(TABLE_ID_ROLE)
 
-        # Use the provided IODEntry list if given, otherwise fall back to model property
-        iod_entry_list = iod_entry_list if iod_entry_list is not None else self.model.iod_list
+        # Use the provided IODEntry list if given, otherwise fall back to model property,
+        # Filters the list if show favorites is selected
+        all_iod_entry_list = iod_entry_list if iod_entry_list is not None else self.model.iod_list
+        iod_entry_list_to_display = all_iod_entry_list
+        if self.show_favorites_only:
+            iod_entry_list_to_display = self.favorites_manager.filter_iod_entry_list(all_iod_entry_list)
+
         search_text = self.view.ui.searchLineEdit.text()
         sort_column = self.sort_column
         sort_reverse = self.sort_reverse
         loaded_children = getattr(self, "_iod_children_loaded", {})
 
         qt_tree_model, selected_row = self.treeview_adapter.build_treeview_model(
-            iod_entry_list=iod_entry_list,
+            iod_entry_list=iod_entry_list_to_display,
             search_text=search_text,
             sort_column=sort_column,
             sort_reverse=sort_reverse,

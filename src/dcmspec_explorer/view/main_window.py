@@ -24,6 +24,7 @@ class MainWindow(QMainWindow):
     iod_treeview_right_click = Signal(QModelIndex, QPoint)  # index and global position
     header_clicked = Signal(int)  # signal payload is clicked column index
     search_text_changed = Signal(str)  # signal payload is search box text
+    toggle_favorites_clicked = Signal()  # signal for Show All / Show Favorites button
 
     def __init__(self):
         """Initialize the main window using compiled UI from Qt Designer.
@@ -64,6 +65,7 @@ class MainWindow(QMainWindow):
         self.ui.iodTreeView.customContextMenuRequested.connect(self._on_treeview_right_click)
         self.ui.searchLineEdit.textChanged.connect(self._on_search_text_changed)
         header.sectionClicked.connect(self._on_treeview_header_clicked)
+        self.ui.toggleFavoritesPushButton.clicked.connect(self._on_toggle_favorites_clicked)
 
     def get_portable_monospace_font(self, size: Optional[int] = None) -> QFont:
         """Get a monospace font that is likely to be available on most platforms."""
@@ -127,6 +129,18 @@ class MainWindow(QMainWindow):
     def _on_search_text_changed(self, text: str) -> None:
         """Emit a custom signal when the search box text changes."""
         self.search_text_changed.emit(text)
+
+    def _on_toggle_favorites_clicked(self):
+        """Emit a custom signal when the Show All / Show Favorites button is clicked."""
+        print("Toggling favorites view")
+        self.toggle_favorites_clicked.emit()
+
+    def set_show_favorites_button_label(self, show_favorites: bool):
+        """Set the label of the Show All / Show Favorites button."""
+        if show_favorites:
+            self.ui.toggleFavoritesPushButton.setText("Show All")
+        else:
+            self.ui.toggleFavoritesPushButton.setText("Show Favorites")
 
     def update_status_bar(self, message: str) -> None:
         """Update the status bar with a message."""

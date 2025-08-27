@@ -43,11 +43,6 @@ class Ui_MainWindow(object):
         self.controlArea.setSizePolicy(sizePolicy)
         self.horizontalLayout = QHBoxLayout(self.controlArea)
         self.horizontalLayout.setObjectName(u"horizontalLayout")
-        self.reloadPushButton = QPushButton(self.controlArea)
-        self.reloadPushButton.setObjectName(u"reloadPushButton")
-
-        self.horizontalLayout.addWidget(self.reloadPushButton)
-
         self.searchLineEdit = QLineEdit(self.controlArea)
         self.searchLineEdit.setObjectName(u"searchLineEdit")
         self.searchLineEdit.setEnabled(True)
@@ -56,6 +51,16 @@ class Ui_MainWindow(object):
         self.searchLineEdit.setClearButtonEnabled(True)
 
         self.horizontalLayout.addWidget(self.searchLineEdit)
+
+        self.toggleFavoritesPushButton = QPushButton(self.controlArea)
+        self.toggleFavoritesPushButton.setObjectName(u"toggleFavoritesPushButton")
+        sizePolicy1 = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        sizePolicy1.setHorizontalStretch(0)
+        sizePolicy1.setVerticalStretch(0)
+        sizePolicy1.setHeightForWidth(self.toggleFavoritesPushButton.sizePolicy().hasHeightForWidth())
+        self.toggleFavoritesPushButton.setSizePolicy(sizePolicy1)
+
+        self.horizontalLayout.addWidget(self.toggleFavoritesPushButton)
 
         self.horizontalSpacer = QSpacerItem(700, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
@@ -66,29 +71,29 @@ class Ui_MainWindow(object):
 
         self.horizontalLayout.addWidget(self.versionLabel)
 
-        self.showAllPushButton = QPushButton(self.controlArea)
-        self.showAllPushButton.setObjectName(u"showAllPushButton")
+        self.reloadPushButton = QPushButton(self.controlArea)
+        self.reloadPushButton.setObjectName(u"reloadPushButton")
 
-        self.horizontalLayout.addWidget(self.showAllPushButton)
+        self.horizontalLayout.addWidget(self.reloadPushButton)
 
 
         self.verticalLayout_3.addWidget(self.controlArea)
 
         self.splitter = QSplitter(self.centralwidget)
         self.splitter.setObjectName(u"splitter")
-        sizePolicy1 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        sizePolicy1.setHorizontalStretch(0)
-        sizePolicy1.setVerticalStretch(0)
-        sizePolicy1.setHeightForWidth(self.splitter.sizePolicy().hasHeightForWidth())
-        self.splitter.setSizePolicy(sizePolicy1)
+        sizePolicy2 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        sizePolicy2.setHorizontalStretch(0)
+        sizePolicy2.setVerticalStretch(0)
+        sizePolicy2.setHeightForWidth(self.splitter.sizePolicy().hasHeightForWidth())
+        self.splitter.setSizePolicy(sizePolicy2)
         self.splitter.setOrientation(Qt.Orientation.Horizontal)
         self.iodlistarea = QWidget(self.splitter)
         self.iodlistarea.setObjectName(u"iodlistarea")
-        sizePolicy2 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
-        sizePolicy2.setHorizontalStretch(0)
-        sizePolicy2.setVerticalStretch(0)
-        sizePolicy2.setHeightForWidth(self.iodlistarea.sizePolicy().hasHeightForWidth())
-        self.iodlistarea.setSizePolicy(sizePolicy2)
+        sizePolicy3 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        sizePolicy3.setHorizontalStretch(0)
+        sizePolicy3.setVerticalStretch(0)
+        sizePolicy3.setHeightForWidth(self.iodlistarea.sizePolicy().hasHeightForWidth())
+        self.iodlistarea.setSizePolicy(sizePolicy3)
         self.iodlistarea.setMinimumSize(QSize(600, 0))
         self.verticalLayout = QVBoxLayout(self.iodlistarea)
         self.verticalLayout.setObjectName(u"verticalLayout")
@@ -108,11 +113,11 @@ class Ui_MainWindow(object):
         self.splitter.addWidget(self.iodlistarea)
         self.detailsArea = QWidget(self.splitter)
         self.detailsArea.setObjectName(u"detailsArea")
-        sizePolicy3 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
-        sizePolicy3.setHorizontalStretch(1)
-        sizePolicy3.setVerticalStretch(0)
-        sizePolicy3.setHeightForWidth(self.detailsArea.sizePolicy().hasHeightForWidth())
-        self.detailsArea.setSizePolicy(sizePolicy3)
+        sizePolicy4 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        sizePolicy4.setHorizontalStretch(1)
+        sizePolicy4.setVerticalStretch(0)
+        sizePolicy4.setHeightForWidth(self.detailsArea.sizePolicy().hasHeightForWidth())
+        self.detailsArea.setSizePolicy(sizePolicy4)
         self.verticalLayout_2 = QVBoxLayout(self.detailsArea)
         self.verticalLayout_2.setObjectName(u"verticalLayout_2")
         self.detailsLabel = QLabel(self.detailsArea)
@@ -134,7 +139,7 @@ class Ui_MainWindow(object):
         MainWindow.setCentralWidget(self.centralwidget)
         self.menubar = QMenuBar(MainWindow)
         self.menubar.setObjectName(u"menubar")
-        self.menubar.setGeometry(QRect(0, 0, 1400, 24))
+        self.menubar.setGeometry(QRect(0, 0, 1400, 43))
         MainWindow.setMenuBar(self.menubar)
         self.statusbar = QStatusBar(MainWindow)
         self.statusbar.setObjectName(u"statusbar")
@@ -147,10 +152,10 @@ class Ui_MainWindow(object):
 
     def retranslateUi(self, MainWindow):
         MainWindow.setWindowTitle(QCoreApplication.translate("MainWindow", u"DCMspec Explorer", None))
-        self.reloadPushButton.setText(QCoreApplication.translate("MainWindow", u"Show All", None))
         self.searchLineEdit.setPlaceholderText(QCoreApplication.translate("MainWindow", u"Search Name or Kind (case-sensitive)...", None))
+        self.toggleFavoritesPushButton.setText(QCoreApplication.translate("MainWindow", u"All/Favorites", None))
         self.versionLabel.setText(QCoreApplication.translate("MainWindow", u"Version", None))
-        self.showAllPushButton.setText(QCoreApplication.translate("MainWindow", u"Reload", None))
+        self.reloadPushButton.setText(QCoreApplication.translate("MainWindow", u"Reload", None))
         self.iodLabel.setText(QCoreApplication.translate("MainWindow", u"IOD List", None))
         self.detailsLabel.setText(QCoreApplication.translate("MainWindow", u"Details", None))
     # retranslateUi
