@@ -8,6 +8,7 @@ import contextlib
 
 from PySide6.QtCore import Qt, QTimer, QObject, QModelIndex, QUrl
 from PySide6.QtGui import QStandardItem
+from PySide6.QtWidgets import QMenu
 
 from dcmspec.progress import Progress
 
@@ -93,6 +94,7 @@ class AppController(QObject):
         self.view.header_clicked.connect(self._on_treeview_header_clicked)
         self.view.search_text_changed.connect(self._on_search_text_changed)
         self.view.iod_treeview_item_selected.connect(self._on_treeview_item_clicked)
+        self.view.iod_treeview_right_click.connect(self._on_treeview_right_click)
         self.view.ui.detailsTextBrowser.anchorClicked.connect(self._on_details_link_clicked)
 
         # Initialize sorting state
@@ -152,6 +154,29 @@ class AppController(QObject):
         else:
             # third-level (Attribute)
             self._handle_attribute_item_clicked(selected_item_node_path)
+
+    def _on_treeview_right_click(self, index: QModelIndex, global_pos):
+        """Show context menu for favorites management on top-level items."""
+        model = index.model()
+        item = model.itemFromIndex(index.siblingAtColumn(0))
+        table_id = item.data(TABLE_ID_ROLE)
+
+        # Create context menu for favorites management
+        menu = QMenu(self.view)
+        if self.favorites_manager.is_favorite(table_id):
+            action = menu.addAction("Remove from favorites")
+        else:
+            action = menu.addAction("Add to favorites")
+        # Connect to the signal triggered if the user selects the action
+        action.triggered.connect(lambda: self._toggle_favorite(table_id))
+        menu.exec(global_pos)
+
+    def _toggle_favorite(self, table_id):
+        if self.favorites_manager.is_favorite(table_id):
+            self.favorites_manager.remove_favorite(table_id)
+        else:
+            self.favorites_manager.add_favorite(table_id)
+        self.apply_filter_and_sort()
 
     def _safe_disconnect(self, *signals: Any) -> None:
         """Safely disconnect all slots from the given Qt signals, suppressing warnings.

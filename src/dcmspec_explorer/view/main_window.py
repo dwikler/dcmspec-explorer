@@ -3,7 +3,7 @@
 import os
 from typing import Optional
 
-from PySide6.QtCore import Signal, QUrl, Qt, QModelIndex
+from PySide6.QtCore import Signal, QUrl, Qt, QModelIndex, QPoint
 from PySide6.QtGui import QFont, QStandardItemModel, QShowEvent, QFontDatabase
 from PySide6.QtWidgets import QMainWindow, QApplication
 from PySide6.QtWidgets import QMessageBox
@@ -21,6 +21,7 @@ class MainWindow(QMainWindow):
     # Define custom signals that will be emitted when UI events occur.
     window_shown = Signal()
     iod_treeview_item_selected = Signal(object)  # signal payload is item index
+    iod_treeview_right_click = Signal(QModelIndex, QPoint)  # index and global position
     header_clicked = Signal(int)  # signal payload is clicked column index
     search_text_changed = Signal(str)  # signal payload is search box text
 
@@ -46,6 +47,9 @@ class MainWindow(QMainWindow):
         header.setFont(header_font)
         header.setSectionsClickable(True)
 
+        # Add custom context menu for the treeview
+        self.ui.iodTreeView.setContextMenuPolicy(Qt.CustomContextMenu)
+
         # Load details pane CSS from resources/styles
         css_path = os.path.join(os.path.dirname(__file__), "..", "resources", "styles", "details.css")
         try:
@@ -57,6 +61,7 @@ class MainWindow(QMainWindow):
 
         # Connect to UI widgets signals
         self.ui.iodTreeView.clicked.connect(self._on_treeview_item_clicked)
+        self.ui.iodTreeView.customContextMenuRequested.connect(self._on_treeview_right_click)
         self.ui.searchLineEdit.textChanged.connect(self._on_search_text_changed)
         header.sectionClicked.connect(self._on_treeview_header_clicked)
 
@@ -108,6 +113,16 @@ class MainWindow(QMainWindow):
 
         """
         self.header_clicked.emit(logical_index)
+
+    def _on_treeview_right_click(self, pos):
+        index = self.ui.iodTreeView.indexAt(pos)
+        if not index.isValid():
+            return
+        # Only allow context menu for top-level items (IODs)
+        if index.parent().isValid():
+            return
+        global_pos = self.ui.iodTreeView.viewport().mapToGlobal(pos)
+        self.iod_treeview_right_click.emit(index, global_pos)
 
     def _on_search_text_changed(self, text: str) -> None:
         """Emit a custom signal when the search box text changes."""
