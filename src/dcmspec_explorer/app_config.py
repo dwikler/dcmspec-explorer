@@ -14,6 +14,26 @@ def find_project_root(marker="pyproject.toml"):
     raise FileNotFoundError(f"Could not find project root with marker {marker}")
 
 
+def parse_bool(val):
+    """Convert a value to boolean, handling both Python bools and common string representations.
+
+    This is useful for config values that may be stored as either a boolean or a string
+    (e.g., true/false, "true"/"false", "yes"/"no", "on"/"off", "1"/"0").
+
+    Args:
+        val: The value to convert (bool, str, or any type).
+
+    Returns:
+        bool: The converted boolean value.
+
+    """
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.strip().lower() in ("1", "true", "yes", "on")
+    return bool(val)
+
+
 def load_app_config() -> Config:
     """Load app-specific configuration with priority search order.
 

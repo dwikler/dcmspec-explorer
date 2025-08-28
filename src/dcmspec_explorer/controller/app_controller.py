@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QMenu
 
 from dcmspec.progress import Progress
 
-from dcmspec_explorer.app_config import load_app_config, setup_logger
+from dcmspec_explorer.app_config import load_app_config, setup_logger, parse_bool
 
 from dcmspec_explorer.model.model import DICOM_TYPE_MAP, DICOM_USAGE_MAP
 from dcmspec_explorer.model.model import Model
@@ -85,7 +85,7 @@ class AppController(QObject):
             favorites_manager=self.favorites_manager, heart_icon=self.view.get_heart_icon()
         )
         # Initialize the favorites view state from config
-        self.show_favorites_only = bool(self.config.get_param("show_favorites_on_start"))
+        self.show_favorites_only = parse_bool(self.config.get_param("show_favorites_on_start"))
         self.view.set_show_favorites_button_label(self.show_favorites_only)
 
         # Initialize the service mediators
@@ -177,6 +177,11 @@ class AppController(QObject):
         model = index.model()
         item = model.itemFromIndex(index.siblingAtColumn(0))
         table_id = item.data(TABLE_ID_ROLE)
+
+        # Do not show context menu if table_id is None
+        if table_id is None:
+            self.logger.warning("Context menu requested for item with no table_id; ignoring.")
+            return
 
         # Create context menu for favorites management
         menu = QMenu(self.view)
