@@ -40,6 +40,12 @@ class FavoritesManager:
                 with open(self.favorites_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     self._favorites = set(data.get("favorites", []))
+            except json.JSONDecodeError as e:
+                # File corruption detected
+                if self.logger:
+                    self.logger.error(f"Favorites file is corrupted: {e}")
+                self._backup_corrupted_favorites_file()
+                self._favorites = set()
             except Exception as e:
                 if self.logger:
                     self.logger.error(f"Failed to load favorites: {e}")
@@ -47,17 +53,45 @@ class FavoritesManager:
         else:
             self._favorites = set()
 
+    def _backup_corrupted_favorites_file(self):
+        """Backup the corrupted favorites file with a timestamp."""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_file = f"{self.favorites_file}.{timestamp}.bak"
+        try:
+            os.rename(self.favorites_file, backup_file)
+            if self.logger:
+                self.logger.error(f"Backed up corrupted favorites file to {backup_file}")
+        except Exception as backup_exc:
+            if self.logger:
+                self.logger.error(f"Failed to backup corrupted favorites file: {backup_exc}")
+
     def _save_favorites(self):
-        """Save favorites to the favorites JSON file in the user's config directory."""
+        """Save favorites to the favorites JSON file in the user's config directory.
+
+        To avoid file corruption if something goes wrong during saving,
+        this method first writes to a temporary file and then replaces the original file only after a successful write.
+
+        """
         data = {
             "favorites": list(self._favorites),
             "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f"),
         }
+        temp_file = f"{self.favorites_file}.tmp"
         try:
             os.makedirs(os.path.dirname(self.favorites_file), exist_ok=True)
-            with open(self.favorites_file, "w", encoding="utf-8") as f:
+            with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_file, self.favorites_file)
         except Exception as e:
+            # Clean up temp file if it exists
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except Exception as cleanup_exc:
+                    if self.logger:
+                        self.logger.error(f"Failed to clean up temp favorites file: {cleanup_exc}")
             if self.logger:
                 self.logger.error(f"Failed to save favorites: {e}")
 
