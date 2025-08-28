@@ -196,7 +196,7 @@ class Model:
                     if title.endswith(" IOD Modules"):
                         iod_name = title[:-12]  # Remove " IOD Modules" (12 characters)
 
-                    # Determine IOD type based on table_id
+                    # Determine IOD kind based on table_id
                     if "_A." in table_id:
                         iod_kind = "Composite"
                     elif "_B." in table_id:
@@ -235,7 +235,7 @@ class Model:
 
         # Create the IOD specification factory
         c_iod_columns_mapping = {0: "ie", 1: "module", 2: "ref", 3: "usage"}
-        n_iod_columns_mapping = {0: "module", 1: "ref", 2: "usage"}
+        n_iod_columns_mapping = {0: "module", 1: "ref", 2: "description"}
         iod_columns_mapping = c_iod_columns_mapping if composite_iod else n_iod_columns_mapping
         iod_factory = SpecFactory(
             column_to_attr=iod_columns_mapping,

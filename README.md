@@ -38,12 +38,20 @@ A modern PySide6-based GUI application for exploring DICOM specifications, power
 3. **Install the PySide6 application (dcmspec will be installed automatically as a dependency):**
 
    ```bash
-   git clone https://github.com/yourusername/dcmspec-explorer.git
+   git clone https://github.com/dwikler/dcmspec-explorer.git
    cd dcmspec-explorer
    pip install .
    ```
 
 4. **Run the app:**
    ```bash
-   dcmspec-explorer-qt
+   dcmspec-explorer
    ```
+
+## Configuration
+
+The application can be configured via a `dcmspec_explorer_config.json` file. Supported keys:
+
+- `cache_dir` (str): Path to the cache directory for downloaded files.
+- `log_level` (str): Logging level ("DEBUG", "INFO", "WARNING", "ERROR"). Default: "INFO"
+- `show_favorites_on_start` (bool): If true, start the app in favorites view; otherwise, show all IODs. Default: false

@@ -1,4 +1,5 @@
 {
   "cache_dir": "./cache",
-  "log_level": "DEBUG"
+  "log_level": "DEBUG",
+  "show_favorites_on_start": true
 }

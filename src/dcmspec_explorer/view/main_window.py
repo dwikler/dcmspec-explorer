@@ -4,7 +4,7 @@ import os
 from typing import Optional
 
 from PySide6.QtCore import Signal, QUrl, Qt, QModelIndex, QPoint
-from PySide6.QtGui import QFont, QStandardItemModel, QShowEvent, QFontDatabase
+from PySide6.QtGui import QFont, QStandardItemModel, QShowEvent, QFontDatabase, QIcon
 from PySide6.QtWidgets import QMainWindow, QApplication
 from PySide6.QtWidgets import QMessageBox
 
@@ -51,6 +51,15 @@ class MainWindow(QMainWindow):
         # Add custom context menu for the treeview
         self.ui.iodTreeView.setContextMenuPolicy(Qt.CustomContextMenu)
 
+        # Custom header style: only show a vertical bar between Name and Kind columns
+        self.ui.iodTreeView.header().setStyleSheet("""
+            QHeaderView::section {
+                border: none;
+                background: transparent;
+                color: palette(window-text);
+            }
+        """)
+
         # Load details pane CSS from resources/styles
         css_path = os.path.join(os.path.dirname(__file__), "..", "resources", "styles", "details.css")
         try:
@@ -59,6 +68,10 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.details_css = ""
             print(f"Warning: Could not load details.css: {e}")
+
+        # Load application icons
+        heart_icon_path = os.path.join(os.path.dirname(__file__), "..", "resources", "icons", "heart.svg")
+        self.heart_icon = QIcon(heart_icon_path) if os.path.exists(heart_icon_path) else None
 
         # Connect to UI widgets signals
         self.ui.iodTreeView.clicked.connect(self._on_treeview_item_clicked)
@@ -80,6 +93,10 @@ class MainWindow(QMainWindow):
         if size is not None:
             font.setPointSize(size)
         return font
+
+    def get_heart_icon(self) -> Optional[QIcon]:
+        """Return the QIcon for the favorites heart, or None if not available."""
+        return self.heart_icon
 
     def set_details_html(self, html_body: str) -> None:
         """Set the HTML content of the details pane, injecting the loaded CSS."""

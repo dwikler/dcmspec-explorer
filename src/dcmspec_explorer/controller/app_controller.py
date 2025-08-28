@@ -81,9 +81,11 @@ class AppController(QObject):
         # Initialize the favorites manager
         self.favorites_manager = FavoritesManager(self.config, self.logger)
         # Initialize the treeview adapter with favorites manager
-        self.treeview_adapter = IODTreeViewModelAdapter(favorites_manager=self.favorites_manager)
-        # Initialize the favorites view state
-        self.show_favorites_only = False
+        self.treeview_adapter = IODTreeViewModelAdapter(
+            favorites_manager=self.favorites_manager, heart_icon=self.view.get_heart_icon()
+        )
+        # Initialize the favorites view state from config
+        self.show_favorites_only = bool(self.config.get_param("show_favorites_on_start"))
         self.view.set_show_favorites_button_label(self.show_favorites_only)
 
         # Initialize the service mediators
@@ -159,7 +161,12 @@ class AppController(QObject):
 
         elif index.parent().parent().isValid() is False:
             # second-level (Module)
-            self._handle_module_item_clicked(selected_item_node_path)
+            # Get the parent (IOD) kind from the parent row, column 1
+            parent_index = index.parent()
+            model = index.model()
+            parent_kind_item = model.itemFromIndex(parent_index.siblingAtColumn(1))
+            iod_kind = parent_kind_item.text() if parent_kind_item else "Unknown"
+            self._handle_module_item_clicked(selected_item_node_path, iod_kind)
 
         else:
             # third-level (Attribute)
@@ -182,10 +189,14 @@ class AppController(QObject):
         menu.exec(global_pos)
 
     def _toggle_favorite(self, table_id):
-        if self.favorites_manager.is_favorite(table_id):
-            self.favorites_manager.remove_favorite(table_id)
-        else:
-            self.favorites_manager.add_favorite(table_id)
+        try:
+            if self.favorites_manager.is_favorite(table_id):
+                self.favorites_manager.remove_favorite(table_id)
+            else:
+                self.favorites_manager.add_favorite(table_id)
+        except Exception as e:
+            self.logger.error(f"Failed to toggle favorite for {table_id}: {e}")
+            self.view.show_error("Failed to update favorites.")
         self.apply_filter_and_sort()
 
     def _safe_disconnect(self, *signals: Any) -> None:
@@ -259,7 +270,7 @@ class AppController(QObject):
         # Set expand property for the selected iod item in the view (will be effective when item will be populated)
         self.view.ui.iodTreeView.expand(index)
 
-    def _handle_module_item_clicked(self, selected_item_path: str) -> None:
+    def _handle_module_item_clicked(self, selected_item_path: str, iod_kind: str) -> None:
         """Handle click on a second-level (Module) item."""
         # Get attribute details from the model using only the node_path
         details = self.model.get_node_details(selected_item_path)
@@ -268,11 +279,18 @@ class AppController(QObject):
             ie = details.get("ie", "Unspecified")
             usage = details.get("usage", "")
             usage_display = DICOM_USAGE_MAP.get(usage, f"Other ({usage})")
-            html = f"""<h1>{details.get("module", "Unknown")} Module</h1>
-                <p><span class="label">IE:</span> {ie}</p>
-                <p><span class="label">Usage:</span> {usage_display}</p>
-                <p><span class="label">Reference:</span> {details.get("ref", "")}</p>
-                """
+            description = details.get("description", "")
+            if iod_kind == "Composite":
+                html = f"""<h1>{details.get("module", "Unknown")} Module</h1>
+                    <p><span class="label">IE:</span> {ie}</p>
+                    <p><span class="label">Usage:</span> {usage_display}</p>
+                    <p><span class="label">Reference:</span> {details.get("ref", "")}</p>
+                    """
+            else:
+                html = f"""<h1>{details.get("module", "Unknown")} Module</h1>
+                    <p><span class="label">Reference:</span> {details.get("ref", "")}</p>
+                    <p><span class="label">Description:</span> {description}</p>
+                    """
         else:
             # Fallback: only show the attribute path
             html = f"""<h1>{selected_item_path} Module</h1>"""
@@ -423,6 +441,8 @@ class AppController(QObject):
         # Only allow sorting on Name (0) and Kind (1)
         if logical_index not in (0, 1):
             self.logger.info("Sorting is only supported on Name and Kind columns.")
+            # Hide the sort indicator if user clicks on a non-sortable column
+            self.view.ui.iodTreeView.header().setSortIndicatorShown(False)
             return
 
         if self.sort_column == logical_index:

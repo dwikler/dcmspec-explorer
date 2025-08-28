@@ -4,7 +4,7 @@ from typing import List, Tuple, Optional
 from anytree import PreOrderIter, Node
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QStandardItemModel, QStandardItem
+from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon
 
 from dcmspec_explorer.model.model import IODEntry
 
@@ -31,9 +31,10 @@ NODE_PATH_ROLE = Qt.UserRole + 2
 class IODTreeViewModelAdapter:
     """Adapt IOD data model to Qt treeview model."""
 
-    def __init__(self, favorites_manager: object = None):
+    def __init__(self, favorites_manager: object = None, heart_icon: Optional[QIcon] = None):
         """Initialize the adapter with an optional favorites manager."""
         self.favorites_manager = favorites_manager
+        self.heart_icon = heart_icon
 
     def build_treeview_model(
         self,
@@ -108,14 +109,19 @@ class IODTreeViewModelAdapter:
 
         """
         model = QStandardItemModel()
-        model.setHorizontalHeaderLabels(["Name", "Kind", "", "♥"])
+        model.setHorizontalHeaderLabels(["Name", "Kind", "", ""])
 
         for iod in iod_list:
             item_name = QStandardItem(iod.name)
             item_kind = QStandardItem(iod.kind)
             item_usage = QStandardItem("")  # Usage column is empty for now
-            heart = "♥" if self.favorites_manager and self.favorites_manager.is_favorite(iod.table_id) else ""
-            item_favorite_flag = QStandardItem(heart)
+            item_favorite_flag = QStandardItem()
+
+            if self.favorites_manager and self.favorites_manager.is_favorite(iod.table_id):
+                if self.heart_icon:
+                    item_favorite_flag.setIcon(self.heart_icon)
+                else:
+                    item_favorite_flag.setText("♥")
 
             # Store table_id and iod_type as data for later retrieval
             item_name.setData(iod.table_id, role=TABLE_ID_ROLE)

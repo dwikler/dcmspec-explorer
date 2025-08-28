@@ -17,6 +17,11 @@ def find_project_root(marker="pyproject.toml"):
 def load_app_config() -> Config:
     """Load app-specific configuration with priority search order.
 
+    Configuration keys:
+    - cache_dir (str): Path to the cache directory for downloaded files.
+    - log_level (str): Logging level ("DEBUG", "INFO", "WARNING", "ERROR"). Default: "INFO"
+    - show_favorites_on_start (bool): If true, start the app in favorites view; otherwise, show all IODs. Default: False
+
     Search order:
     1. App-specific config files (dcmspec_explorer_config.json) - Tier 1
         - Current directory
@@ -50,6 +55,10 @@ def load_app_config() -> Config:
 
     if config.get_param("log_level") is None:
         config.set_param("log_level", "INFO")
+
+    # Set default for show_favorites_on_start if not specified
+    if config.get_param("show_favorites_on_start") is None:
+        config.set_param("show_favorites_on_start", False)
 
     return config
 
