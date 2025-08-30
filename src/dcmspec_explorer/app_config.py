@@ -1,7 +1,11 @@
 """Configuration Helper Module for the DCMspec Explorer application."""
 
 import logging
+import os
 from pathlib import Path
+
+from platformdirs import user_config_dir
+
 from dcmspec.config import Config
 
 
@@ -35,7 +39,7 @@ def parse_bool(val):
 
 
 def load_app_config() -> Config:
-    """Load app-specific configuration with priority search order.
+    r"""Load app-specific configuration with priority search order.
 
     Configuration keys:
     - cache_dir (str): Path to the cache directory for downloaded files.
@@ -43,32 +47,41 @@ def load_app_config() -> Config:
     - show_favorites_on_start (bool): If true, start the app in favorites view; otherwise, show all IODs. Default: False
 
     Search order:
-    1. App-specific config files (dcmspec_explorer_config.json) - Tier 1
-        - Current directory
-        - ~/.config/dcmspec-explorer/
-        - Project root config directory (config/dcmspec_explorer_config.json)
-    2. Base library config file (config.json) - Tier 2 fallback
-        - Platform-specific user config directory via Config class
-    3. If no config file is found, or if a key is missing, defaults are used.
+    0. Environment variable (highest priority):
+        - Set DCMSPEC_EXPLORER_CONFIG to the full path of a config file to override all other locations.
+    1. User config directory (recommended for all users):
+        - platformdirs user_config_dir("dcmspec-explorer", "dcmspec"), e.g.:
+            - Linux:   ~/.config/dcmspec-explorer/dcmspec_explorer_config.json
+            - macOS:   ~/Library/Application Support/dcmspec/dcmspec-explorer/dcmspec_explorer_config.json
+            - Windows: %APPDATA%\dcmspec\dcmspec-explorer\dcmspec_explorer_config.json
+    2. Project config directory (recommended for developers):
+        - config/dcmspec_explorer_config.json in the project root.
+    3. Current directory (easy for less experienced users):
+        - dcmspec_explorer_config.json in the current working directory.
+    4. If no config file is found, or if a key is missing, defaults are used via the base Config class.
 
-    Note: The Config class always looks for a config file. When we pass
-    config_file=None, it uses user_config_dir(app_name)/config.json as default.
+    Note: If no config file is found, the Config class will use built-in defaults and a user-writable config directory
+    for any files it manages.
 
     Returns:
         Config: Configuration object with app-specific settings.
 
     """
-    import os
-
     project_root = find_project_root()
+    # 0. Environment variable (highest priority)
+    env_config = os.environ.get("DCMSPEC_EXPLORER_CONFIG")
     app_config_locations = [
-        "dcmspec_explorer_config.json",  # Current directory
-        os.path.expanduser("~/.config/dcmspec-explorer/dcmspec_explorer_config.json"),  # User config
-        str(project_root / "config" / "dcmspec_explorer_config.json"),  # Project root config dir
+        env_config or None,
+        # 1. User config (recommended for all users)
+        os.path.join(user_config_dir("dcmspec-explorer", "dcmspec"), "dcmspec_explorer_config.json"),
+        # 2. Project config dir (recommended for developers)
+        str(project_root / "config" / "dcmspec_explorer_config.json"),
+        # 3. Current directory (easy for less experienced users)
+        "dcmspec_explorer_config.json",
     ]
 
     config_file = next(
-        (location for location in app_config_locations if os.path.exists(location)),
+        (location for location in app_config_locations if location and os.path.exists(location)),
         None,
     )
     config = Config(app_name="dcmspec_explorer", config_file=config_file)
