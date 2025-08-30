@@ -1,13 +1,16 @@
 """Model class for the DCMspec Explorer application."""
 
 import logging
+import os
 import re
 import shutil
+import tempfile
 from typing import List, NamedTuple, Tuple
 from urllib.parse import urljoin
-import os
-import glob
 
+from anytree import Node
+
+from bs4 import BeautifulSoup
 from dcmspec.config import Config
 from dcmspec.xhtml_doc_handler import XHTMLDocHandler
 from dcmspec.dom_table_spec_parser import DOMTableSpecParser
@@ -59,16 +62,19 @@ class Model:
         self.doc_handler = XHTMLDocHandler(config=self.config, logger=self.logger)
         # Initialize DOM parser for DICOM standard version extraction
         self.dom_parser = DOMTableSpecParser(logger=self.logger)
+        # Initialize DICOM version tracking attributes
+        self._version = None
+        self._new_version_available = False
 
     @property
     def version(self):
         """Return the DICOM version string for the loaded iod_list."""
-        return getattr(self, "_version", None)
+        return self._version
 
     @property
     def new_version_available(self):
         """Return True if the DICOM version changed after the last load."""
-        return getattr(self, "_new_version_available", False)
+        return self._new_version_available
 
     @property
     def iod_list(self) -> List[IODEntry]:
@@ -92,15 +98,55 @@ class Model:
         """
         self.logger.debug("Loading IOD list...")
 
+        cache_file_name = "ps3.3.html"
+        standard_cache_dir = os.path.join(self.config.cache_dir, "standard")
+
         try:
-            iod_entry_list, version = self._parse_iod_list_from_html(force_download, progress_observer)
+            if force_download:
+                # Create a unique temp filename for the standard folder
+                with tempfile.NamedTemporaryFile(delete=False, dir=standard_cache_dir, suffix=".html") as tmp:
+                    temp_file_name = os.path.basename(tmp.name)
+                    temp_file_path = tmp.name
+                soup = self.doc_handler.load_document(
+                    cache_file_name=temp_file_name,
+                    url=self.part3_toc_url,
+                    force_download=True,
+                    progress_observer=progress_observer,
+                )
+                # Move the temp file from standard/ to cache root to protect it from archiving
+                cache_root_temp_path = os.path.join(self.config.cache_dir, temp_file_name)
+                try:
+                    shutil.move(temp_file_path, cache_root_temp_path)
+                    temp_file_path = cache_root_temp_path  # Update for later use
+                except Exception as e:
+                    self.logger.warning(f"Failed to move temp TOC from standard to cache root: {e}")
+            else:
+                soup = self.doc_handler.load_document(
+                    cache_file_name=cache_file_name,
+                    url=self.part3_toc_url,
+                    force_download=False,
+                    progress_observer=progress_observer,
+                )
+
+            iod_entry_list, version = self._parse_iod_list_from_html(soup)
             self._handle_version_change(version, force_download)
             self._iod_root, self._iod_dict = self._build_iods_model(iod_entry_list)
-            return iod_entry_list
         except Exception as e:
             error_msg = f"Failed to load DICOM specification: \n{str(e)}"
             self.logger.error(error_msg)
             raise RuntimeError(error_msg) from e
+
+        # Move the temp file to the canonical location after archiving/version handling
+        if force_download:
+            final_toc_path = os.path.join(standard_cache_dir, cache_file_name)
+            if not os.path.exists(standard_cache_dir):
+                os.makedirs(standard_cache_dir, exist_ok=True)
+            try:
+                shutil.move(temp_file_path, final_toc_path)
+            except Exception as e:
+                self.logger.warning(f"Failed to move new TOC to {final_toc_path}: {e}")
+
+        return iod_entry_list
 
     def _handle_version_change(self, version: str, force_download: bool) -> None:
         """Handle changes in the DICOM version.
@@ -111,7 +157,7 @@ class Model:
 
         """
         # Check if the version changed
-        self._new_version_available = getattr(self, "_version", None) and self._version != version
+        self._new_version_available = self._version is not None and self._version != version
 
         # If force_download and the version has changed, clear the cache
         if force_download and self._new_version_available:
@@ -125,27 +171,16 @@ class Model:
         # Update the version
         self._version = version
 
-    def _parse_iod_list_from_html(
-        self, force_download: bool, progress_observer: ServiceProgressObserver
-    ) -> Tuple[List[IODEntry], str]:
-        """Download and parse the HTML, extract IOD list and version.
+    def _parse_iod_list_from_html(self, soup: BeautifulSoup) -> Tuple[List[IODEntry], str]:
+        """Parse the HTML soup, extract IOD list and version.
 
         Args:
-            force_download (bool): If True, force download from URL instead of using cache.
-            progress_observer (ServiceProgressObserver): A progress observer to report progress.
+            soup: BeautifulSoup object of the loaded HTML.
 
         Returns:
             Tuple[List[IODEntry], str]: A tuple of (IODEntry list, version string).
 
         """
-        cache_file_name = "ps3.3.html"
-        soup = self.doc_handler.load_document(
-            cache_file_name=cache_file_name,
-            url=self.part3_toc_url,
-            force_download=force_download,
-            progress_observer=progress_observer,
-        )
-
         # Extract DICOM standard version
         version = self.dom_parser.get_version(soup, "")
 
@@ -176,8 +211,6 @@ class Model:
                 iod_dict: Dict mapping table_id to the corresponding IOD node.
 
         """
-        from anytree import Node
-
         iod_root = Node("IOD List")
         iod_dict = {}
         for iod in iod_entry_list:
@@ -362,39 +395,45 @@ class Model:
         return None if node is None else node.__dict__
 
     def _archive_previous_version_cache(self):
-        """Move cached standard and model files to a versioned cache/<old_version>/ folder."""
-        prev_version = getattr(self, "_version", None)
+        """Move the entire standard and model cache folders to a versioned cache/<old_version>/ folder."""
+        prev_version = self._version
         if not prev_version:
             self.logger.info("No previous version found; skipping cache move.")
             return
 
         cache_dir = self.config.cache_dir
         versioned_dir = os.path.join(cache_dir, prev_version)
+        standard_cache_dir = os.path.join(cache_dir, "standard")
+        model_cache_dir = os.path.join(cache_dir, "model")
         versioned_standard_dir = os.path.join(versioned_dir, "standard")
         versioned_model_dir = os.path.join(versioned_dir, "model")
-        os.makedirs(versioned_standard_dir, exist_ok=True)
-        os.makedirs(versioned_model_dir, exist_ok=True)
 
-        # Move all files from standard cache to versioned/standard
-        standard_cache_dir = os.path.join(cache_dir, "standard")
-        for file in glob.glob(os.path.join(standard_cache_dir, "*")):
-            if os.path.isdir(file):
-                continue
-            dest_file = os.path.join(versioned_standard_dir, os.path.basename(file))
-            try:
-                shutil.move(file, dest_file)
-                self.logger.info(f"Moved standard cache file to versioned folder: {dest_file}")
-            except Exception as e:
-                self.logger.warning(f"Failed to move {file} to {dest_file}: {e}")
+        # If the versioned archive already exists, move it to a timestamped backup folder
+        if os.path.exists(versioned_dir):
+            from datetime import datetime
 
-        # Move all files from model cache to versioned/model
-        model_cache_dir = os.path.join(cache_dir, "model")
-        for file in glob.glob(os.path.join(model_cache_dir, "*")):
-            if os.path.isdir(file):
-                continue
-            dest_file = os.path.join(versioned_model_dir, os.path.basename(file))
+            timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+            backup_dir = f"{versioned_dir}_backup_{timestamp}"
             try:
-                shutil.move(file, dest_file)
-                self.logger.info(f"Moved model cache file to versioned folder: {dest_file}")
+                shutil.move(versioned_dir, backup_dir)
+                self.logger.info(f"Existing archive {versioned_dir} moved to {backup_dir}")
             except Exception as e:
-                self.logger.warning(f"Failed to move {file} to {dest_file}: {e}")
+                self.logger.warning(f"Failed to move existing archive {versioned_dir} to {backup_dir}: {e}")
+
+        # Move the entire standard folder if it exists
+        if os.path.exists(standard_cache_dir):
+            os.makedirs(versioned_dir, exist_ok=True)
+            try:
+                shutil.move(standard_cache_dir, versioned_standard_dir)
+                self.logger.info(f"Moved standard cache folder to versioned folder: {versioned_standard_dir}")
+            except Exception as e:
+                self.logger.warning(f"Failed to move {standard_cache_dir} to {versioned_standard_dir}: {e}")
+
+        # Move the entire model folder if it exists
+        if os.path.exists(model_cache_dir):
+            os.makedirs(versioned_dir, exist_ok=True)
+            try:
+                shutil.move(model_cache_dir, versioned_model_dir)
+                self.logger.info(f"Moved model cache folder to versioned folder: {versioned_model_dir}")
+            except Exception as e:
+                self.logger.warning(f"Failed to move {model_cache_dir} to {versioned_model_dir}: {e}")
