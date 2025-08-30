@@ -8,16 +8,22 @@ import contextlib
 
 from PySide6.QtCore import Qt, QTimer, QObject, QModelIndex, QUrl
 from PySide6.QtGui import QStandardItem
+from PySide6.QtWidgets import QMenu
 
 from dcmspec.progress import Progress
 
-from dcmspec_explorer.app_config import load_app_config, setup_logger
+from dcmspec_explorer.app_config import load_app_config, setup_logger, parse_bool
+
 from dcmspec_explorer.model.model import DICOM_TYPE_MAP, DICOM_USAGE_MAP
 from dcmspec_explorer.model.model import Model
 from dcmspec_explorer.model.model import IODEntry
+
 from dcmspec_explorer.services.service_mediator import IODListLoaderServiceMediator, IODModelLoaderServiceMediator
+from dcmspec_explorer.services.favorites_manager import FavoritesManager
+
 from dcmspec_explorer.view.load_iod_dialog import LoadIODDialog
 from dcmspec_explorer.view.main_window import MainWindow
+
 from dcmspec_explorer.controller.iod_treeview_adapter import (
     IODTreeViewModelAdapter,
     TABLE_ID_ROLE,
@@ -72,6 +78,16 @@ class AppController(QObject):
         self.model = Model(self.config, self.logger)
         self.view = MainWindow()
 
+        # Initialize the favorites manager
+        self.favorites_manager = FavoritesManager(self.config, self.logger)
+        # Initialize the treeview adapter with favorites manager
+        self.treeview_adapter = IODTreeViewModelAdapter(
+            favorites_manager=self.favorites_manager, heart_icon=self.view.get_heart_icon()
+        )
+        # Initialize the favorites view state from config
+        self.show_favorites_only = parse_bool(self.config.get_param("show_favorites_on_start"))
+        self.view.set_show_favorites_button_label(self.show_favorites_only)
+
         # Initialize the service mediators
         self.service = IODListLoaderServiceMediator(self.model, self.logger, parent=self)
         self.iod_model_service = IODModelLoaderServiceMediator(self.model, self.logger, parent=self)
@@ -83,7 +99,9 @@ class AppController(QObject):
         self.view.header_clicked.connect(self._on_treeview_header_clicked)
         self.view.search_text_changed.connect(self._on_search_text_changed)
         self.view.iod_treeview_item_selected.connect(self._on_treeview_item_clicked)
+        self.view.iod_treeview_right_click.connect(self._on_treeview_right_click)
         self.view.ui.detailsTextBrowser.anchorClicked.connect(self._on_details_link_clicked)
+        self.view.toggle_favorites_clicked.connect(self._on_toggle_favorites_clicked)
 
         # Initialize sorting state
         self.sort_column: Optional[int] = None  # No sorting on first load
@@ -118,6 +136,12 @@ class AppController(QObject):
         """Handle search box text change and update filtering."""
         self.apply_filter_and_sort()
 
+    def _on_toggle_favorites_clicked(self):
+        """Toggle between showing all IODs and only favorites."""
+        self.show_favorites_only = not self.show_favorites_only
+        self.view.set_show_favorites_button_label(self.show_favorites_only)
+        self.apply_filter_and_sort()
+
     def _on_treeview_item_clicked(self, index: QModelIndex) -> None:
         """Handle selection of a treeview item."""
         model = index.model()
@@ -137,11 +161,48 @@ class AppController(QObject):
 
         elif index.parent().parent().isValid() is False:
             # second-level (Module)
-            self._handle_module_item_clicked(selected_item_node_path)
+            # Get the parent (IOD) kind from the parent row, column 1
+            parent_index = index.parent()
+            model = index.model()
+            parent_kind_item = model.itemFromIndex(parent_index.siblingAtColumn(1))
+            iod_kind = parent_kind_item.text() if parent_kind_item else "Unknown"
+            self._handle_module_item_clicked(selected_item_node_path, iod_kind)
 
         else:
             # third-level (Attribute)
             self._handle_attribute_item_clicked(selected_item_node_path)
+
+    def _on_treeview_right_click(self, index: QModelIndex, global_pos):
+        """Show context menu for favorites management on top-level items."""
+        model = index.model()
+        item = model.itemFromIndex(index.siblingAtColumn(0))
+        table_id = item.data(TABLE_ID_ROLE)
+
+        # Do not show context menu if table_id is None
+        if table_id is None:
+            self.logger.warning("Context menu requested for item with no table_id; ignoring.")
+            return
+
+        # Create context menu for favorites management
+        menu = QMenu(self.view)
+        if self.favorites_manager.is_favorite(table_id):
+            action = menu.addAction("Remove from favorites")
+        else:
+            action = menu.addAction("Add to favorites")
+        # Connect to the signal triggered if the user selects the action
+        action.triggered.connect(lambda: self._toggle_favorite(table_id))
+        menu.exec(global_pos)
+
+    def _toggle_favorite(self, table_id):
+        try:
+            if self.favorites_manager.is_favorite(table_id):
+                self.favorites_manager.remove_favorite(table_id)
+            else:
+                self.favorites_manager.add_favorite(table_id)
+        except Exception as e:
+            self.logger.error(f"Failed to toggle favorite for {table_id}: {e}")
+            self.view.show_error("Failed to update favorites.")
+        self.apply_filter_and_sort()
 
     def _safe_disconnect(self, *signals: Any) -> None:
         """Safely disconnect all slots from the given Qt signals, suppressing warnings.
@@ -214,7 +275,7 @@ class AppController(QObject):
         # Set expand property for the selected iod item in the view (will be effective when item will be populated)
         self.view.ui.iodTreeView.expand(index)
 
-    def _handle_module_item_clicked(self, selected_item_path: str) -> None:
+    def _handle_module_item_clicked(self, selected_item_path: str, iod_kind: str) -> None:
         """Handle click on a second-level (Module) item."""
         # Get attribute details from the model using only the node_path
         details = self.model.get_node_details(selected_item_path)
@@ -223,11 +284,18 @@ class AppController(QObject):
             ie = details.get("ie", "Unspecified")
             usage = details.get("usage", "")
             usage_display = DICOM_USAGE_MAP.get(usage, f"Other ({usage})")
-            html = f"""<h1>{details.get("module", "Unknown")} Module</h1>
-                <p><span class="label">IE:</span> {ie}</p>
-                <p><span class="label">Usage:</span> {usage_display}</p>
-                <p><span class="label">Reference:</span> {details.get("ref", "")}</p>
-                """
+            description = details.get("description", "")
+            if iod_kind == "Composite":
+                html = f"""<h1>{details.get("module", "Unknown")} Module</h1>
+                    <p><span class="label">IE:</span> {ie}</p>
+                    <p><span class="label">Usage:</span> {usage_display}</p>
+                    <p><span class="label">Reference:</span> {details.get("ref", "")}</p>
+                    """
+            else:
+                html = f"""<h1>{details.get("module", "Unknown")} Module</h1>
+                    <p><span class="label">Reference:</span> {details.get("ref", "")}</p>
+                    <p><span class="label">Description:</span> {description}</p>
+                    """
         else:
             # Fallback: only show the attribute path
             html = f"""<h1>{selected_item_path} Module</h1>"""
@@ -344,15 +412,20 @@ class AppController(QObject):
             if selected_item:
                 selected_table_id = selected_item.data(TABLE_ID_ROLE)
 
-        # Use the provided IODEntry list if given, otherwise fall back to model property
-        iod_entry_list = iod_entry_list if iod_entry_list is not None else self.model.iod_list
+        # Use the provided IODEntry list if given, otherwise fall back to model property,
+        # Filters the list if show favorites is selected
+        all_iod_entry_list = iod_entry_list if iod_entry_list is not None else self.model.iod_list
+        iod_entry_list_to_display = all_iod_entry_list
+        if self.show_favorites_only:
+            iod_entry_list_to_display = self.favorites_manager.filter_iod_entry_list(all_iod_entry_list)
+
         search_text = self.view.ui.searchLineEdit.text()
         sort_column = self.sort_column
         sort_reverse = self.sort_reverse
         loaded_children = getattr(self, "_iod_children_loaded", {})
 
-        qt_tree_model, selected_row = IODTreeViewModelAdapter.build_treeview_model(
-            iod_entry_list=iod_entry_list,
+        qt_tree_model, selected_row = self.treeview_adapter.build_treeview_model(
+            iod_entry_list=iod_entry_list_to_display,
             search_text=search_text,
             sort_column=sort_column,
             sort_reverse=sort_reverse,
@@ -373,6 +446,8 @@ class AppController(QObject):
         # Only allow sorting on Name (0) and Kind (1)
         if logical_index not in (0, 1):
             self.logger.info("Sorting is only supported on Name and Kind columns.")
+            # Hide the sort indicator if user clicks on a non-sortable column
+            self.view.ui.iodTreeView.header().setSortIndicatorShown(False)
             return
 
         if self.sort_column == logical_index:
