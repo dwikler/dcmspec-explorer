@@ -32,6 +32,7 @@ class MainWindow(QMainWindow):
     header_clicked = Signal(int)  # signal payload is clicked column index
     search_text_changed = Signal(str)  # signal payload is search box text
     toggle_favorites_clicked = Signal()  # signal for Show All / Show Favorites button
+    reload_clicked = Signal()  # signal for Reload button
 
     def __init__(self):
         """Initialize the main window using compiled UI from Qt Designer.
@@ -86,6 +87,7 @@ class MainWindow(QMainWindow):
         self.ui.searchLineEdit.textChanged.connect(self._on_search_text_changed)
         header.sectionClicked.connect(self._on_treeview_header_clicked)
         self.ui.toggleFavoritesPushButton.clicked.connect(self._on_toggle_favorites_clicked)
+        self.ui.reloadPushButton.clicked.connect(self._on_reload_clicked)
 
     def get_portable_monospace_font(self, size: Optional[int] = None) -> QFont:
         """Get a monospace font that is likely to be available on most platforms."""
@@ -157,6 +159,10 @@ class MainWindow(QMainWindow):
     def _on_toggle_favorites_clicked(self):
         """Emit a custom signal when the Show All / Show Favorites button is clicked."""
         self.toggle_favorites_clicked.emit()
+
+    def _on_reload_clicked(self):
+        """Emit a custom signal when the Reload button is clicked."""
+        self.reload_clicked.emit()
 
     def set_show_favorites_button_label(self, show_favorites: bool):
         """Set the label of the Show All / Show Favorites button."""

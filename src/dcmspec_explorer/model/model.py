@@ -2,8 +2,11 @@
 
 import logging
 import re
+import shutil
 from typing import List, NamedTuple, Tuple
 from urllib.parse import urljoin
+import os
+import glob
 
 from dcmspec.config import Config
 from dcmspec.xhtml_doc_handler import XHTMLDocHandler
@@ -44,6 +47,8 @@ class IODEntry(NamedTuple):
 class Model:
     """Data model for DICOM specifications."""
 
+    PART3_XHTML_CACHE_FILE_NAME = "Part3.xhtml"
+
     def __init__(self, config: Config, logger: logging.Logger):
         """Initialize the data model."""
         self.config = config
@@ -59,6 +64,11 @@ class Model:
     def version(self):
         """Return the DICOM version string for the loaded iod_list."""
         return getattr(self, "_version", None)
+
+    @property
+    def new_version_available(self):
+        """Return True if the DICOM version changed after the last load."""
+        return getattr(self, "_new_version_available", False)
 
     @property
     def iod_list(self) -> List[IODEntry]:
@@ -84,13 +94,36 @@ class Model:
 
         try:
             iod_entry_list, version = self._parse_iod_list_from_html(force_download, progress_observer)
-            self._version = version
+            self._handle_version_change(version, force_download)
             self._iod_root, self._iod_dict = self._build_iods_model(iod_entry_list)
             return iod_entry_list
         except Exception as e:
             error_msg = f"Failed to load DICOM specification: \n{str(e)}"
             self.logger.error(error_msg)
             raise RuntimeError(error_msg) from e
+
+    def _handle_version_change(self, version: str, force_download: bool) -> None:
+        """Handle changes in the DICOM version.
+
+        Args:
+            version (str): The new DICOM version.
+            force_download (bool): If True, force download from URL instead of using cache.
+
+        """
+        # Check if the version changed
+        self._new_version_available = getattr(self, "_version", None) and self._version != version
+
+        # If force_download and the version has changed, clear the cache
+        if force_download and self._new_version_available:
+            self.logger.info(
+                f"New DICOM version detected ({version}), clearing cache for previous version ({self._version})."
+            )
+            self._archive_previous_version_cache()
+        else:
+            self.logger.info(f"Same DICOM version detected ({version}), keeping cached files.")
+
+        # Update the version
+        self._version = version
 
     def _parse_iod_list_from_html(
         self, force_download: bool, progress_observer: ServiceProgressObserver
@@ -227,7 +260,7 @@ class Model:
 
         """
         url = "https://dicom.nema.org/medical/dicom/current/output/html/part03.html"
-        cache_file_name = "Part3.xhtml"
+        cache_file_name = self.PART3_XHTML_CACHE_FILE_NAME
         model_file_name = f"Part3_{table_id}_expanded.json"
 
         # Determine if this is a composite or normalized IOD
@@ -327,3 +360,41 @@ class Model:
         """
         node = self.get_node_by_path(node_path)
         return None if node is None else node.__dict__
+
+    def _archive_previous_version_cache(self):
+        """Move cached standard and model files to a versioned cache/<old_version>/ folder."""
+        prev_version = getattr(self, "_version", None)
+        if not prev_version:
+            self.logger.info("No previous version found; skipping cache move.")
+            return
+
+        cache_dir = self.config.cache_dir
+        versioned_dir = os.path.join(cache_dir, prev_version)
+        versioned_standard_dir = os.path.join(versioned_dir, "standard")
+        versioned_model_dir = os.path.join(versioned_dir, "model")
+        os.makedirs(versioned_standard_dir, exist_ok=True)
+        os.makedirs(versioned_model_dir, exist_ok=True)
+
+        # Move all files from standard cache to versioned/standard
+        standard_cache_dir = os.path.join(cache_dir, "standard")
+        for file in glob.glob(os.path.join(standard_cache_dir, "*")):
+            if os.path.isdir(file):
+                continue
+            dest_file = os.path.join(versioned_standard_dir, os.path.basename(file))
+            try:
+                shutil.move(file, dest_file)
+                self.logger.info(f"Moved standard cache file to versioned folder: {dest_file}")
+            except Exception as e:
+                self.logger.warning(f"Failed to move {file} to {dest_file}: {e}")
+
+        # Move all files from model cache to versioned/model
+        model_cache_dir = os.path.join(cache_dir, "model")
+        for file in glob.glob(os.path.join(model_cache_dir, "*")):
+            if os.path.isdir(file):
+                continue
+            dest_file = os.path.join(versioned_model_dir, os.path.basename(file))
+            try:
+                shutil.move(file, dest_file)
+                self.logger.info(f"Moved model cache file to versioned folder: {dest_file}")
+            except Exception as e:
+                self.logger.warning(f"Failed to move {file} to {dest_file}: {e}")
