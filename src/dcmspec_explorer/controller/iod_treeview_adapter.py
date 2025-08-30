@@ -3,10 +3,10 @@
 from typing import List, Tuple, Optional
 from anytree import PreOrderIter, Node
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon
 
 from dcmspec_explorer.model.model import IODEntry
+from dcmspec_explorer.qt.qt_roles import TABLE_ID_ROLE, TABLE_URL_ROLE, NODE_PATH_ROLE, IS_FAVORITE_ROLE
 
 # Define mapping of column names to their indices
 COLUMN_INDEX = {
@@ -15,17 +15,6 @@ COLUMN_INDEX = {
     "usage": 2,
     "favorite": 3,
 }
-
-# Define custom roles constants for storing extra data in QStandardItem objects.
-# These roles are used to associate domain-specific data with treeview items
-# without interfering with Qt's built-in roles.
-#
-# TABLE_ID_ROLE: Used to store the unique table_id for top-level IODEntry items.
-# TABLE_URL_ROLE: Used to store the table_url for top-level IODEntry items.
-# NODE_PATH_ROLE: Used to store the Anytree node_path corresponding to the item
-TABLE_ID_ROLE = Qt.UserRole
-TABLE_URL_ROLE = Qt.UserRole + 1
-NODE_PATH_ROLE = Qt.UserRole + 2
 
 
 class IODTreeViewModelAdapter:
@@ -117,11 +106,9 @@ class IODTreeViewModelAdapter:
             item_usage = QStandardItem("")  # Usage column is empty for now
             item_favorite_flag = QStandardItem()
 
-            if self.favorites_manager and self.favorites_manager.is_favorite(iod.table_id):
-                if self.heart_icon:
-                    item_favorite_flag.setIcon(self.heart_icon)
-                else:
-                    item_favorite_flag.setText("♥")
+            # Set the favorite icon if the item is a favorite
+            is_favorite = self.favorites_manager and self.favorites_manager.is_favorite(iod.table_id)
+            item_favorite_flag.setData(is_favorite, IS_FAVORITE_ROLE)
 
             # Store table_id and iod_type as data for later retrieval
             item_name.setData(iod.table_id, role=TABLE_ID_ROLE)
