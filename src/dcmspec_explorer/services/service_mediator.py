@@ -55,10 +55,10 @@ class BaseServiceMediator(QObject):
         self._thread = None
         self._poll_timer = None
 
-    def start_worker(self, worker_cls: type, *worker_args: Any) -> Tuple[Any, threading.Thread]:
+    def start_worker(self, worker_cls: type, **worker_kwargs: Any) -> Tuple[Any, threading.Thread]:
         """Start the given worker in a background thread and begin polling its event queue."""
         self._event_queue = queue.Queue()
-        self._worker = worker_cls(*worker_args, logger=self.logger, event_queue=self._event_queue)
+        self._worker = worker_cls(logger=self.logger, event_queue=self._event_queue, **worker_kwargs)
         self._thread = threading.Thread(target=self._worker.run, daemon=True)
         self._thread.start()
 
@@ -108,9 +108,9 @@ class IODListLoaderServiceMediator(BaseServiceMediator):
             "error": (self.iodlist_error_signal, True),
         }
 
-    def start_iodlist_worker(self) -> Tuple[IODListLoaderWorker, threading.Thread]:
+    def start_iodlist_worker(self, force_download: bool = False) -> Tuple[IODListLoaderWorker, threading.Thread]:
         """Start the IOD list loader worker in a background thread."""
-        return self.start_worker(IODListLoaderWorker, self.model)
+        return self.start_worker(IODListLoaderWorker, model=self.model, force_download=force_download)
 
 
 class IODModelLoaderServiceMediator(BaseServiceMediator):
@@ -132,4 +132,4 @@ class IODModelLoaderServiceMediator(BaseServiceMediator):
 
     def start_iodmodel_worker(self, table_id: str) -> Tuple[IODModelLoaderWorker, threading.Thread]:
         """Start the IOD model loader worker in a background thread."""
-        return self.start_worker(IODModelLoaderWorker, self.model, table_id)
+        return self.start_worker(IODModelLoaderWorker, model=self.model, table_id=table_id)

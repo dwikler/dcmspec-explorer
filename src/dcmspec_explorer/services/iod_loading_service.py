@@ -11,18 +11,22 @@ from dcmspec_explorer.services.progress_observer import ServiceProgressObserver
 class IODListLoaderWorker:
     """Load IOD list in a background thread."""
 
-    def __init__(self, model: Any, logger: logging.Logger, event_queue: queue.Queue) -> None:
+    def __init__(
+        self, model: Any, logger: logging.Logger, event_queue: queue.Queue, force_download: bool = False
+    ) -> None:
         """Initialize the worker with the model to load IOD list.
 
         Args:
             model: The model instance to use for loading the IOD list.
             logger: The logger instance for logging progress and errors.
             event_queue: The event queue to put progress updates into.
+            force_download: Whether to force download from the web.
 
         """
         self.model = model
         self.logger = logger
         self.event_queue = event_queue
+        self.force_download = force_download
 
     def run(self) -> None:
         """Run the worker to load IOD list and send events to the event queue."""
@@ -33,7 +37,9 @@ class IODListLoaderWorker:
         progress_observer = ServiceProgressObserver(self.event_queue)
 
         try:
-            iod_entry_list = self.model.load_iod_list(progress_observer=progress_observer)
+            iod_entry_list = self.model.load_iod_list(
+                force_download=self.force_download, progress_observer=progress_observer
+            )
             self.event_queue.put(("loaded", iod_entry_list))
         except Exception as e:
             self.event_queue.put(("error", str(e)))

@@ -102,6 +102,7 @@ class AppController(QObject):
         self.view.iod_treeview_right_click.connect(self._on_treeview_right_click)
         self.view.ui.detailsTextBrowser.anchorClicked.connect(self._on_details_link_clicked)
         self.view.toggle_favorites_clicked.connect(self._on_toggle_favorites_clicked)
+        self.view.reload_clicked.connect(self._on_reload_clicked)
 
         # Initialize sorting state
         self.sort_column: Optional[int] = None  # No sorting on first load
@@ -123,14 +124,8 @@ class AppController(QObject):
         # Start the worker in a background thread via the service mediator
         self._treeview_worker, self._treeview_thread = self.service.start_iodlist_worker()
 
-        # Connect service mediator's Qt signals to UI update methods.
-        # By specifying Qt.QueuedConnection, we ensure that if a signal is emitted from any thread,
-        # the connected slot (UI update method) will be executed in the thread that owns the receiver object.
-        # In this case, both the ServiceMediator and AppController live in the main thread, so UI updates
-        # are performed in the main thread, ensuring thread safety for all Qt UI operations.
-        self.service.iodlist_progress_signal.connect(self._handle_iodlist_progress, Qt.QueuedConnection)
-        self.service.iodlist_loaded_signal.connect(self._handle_iodlist_loaded, Qt.QueuedConnection)
-        self.service.iodlist_error_signal.connect(self._handle_iodlist_error, Qt.QueuedConnection)
+        # Connect signals for progress, loaded, and error
+        self._connect_iodlist_signals()
 
     def _on_search_text_changed(self, text: str) -> None:
         """Handle search box text change and update filtering."""
@@ -193,6 +188,15 @@ class AppController(QObject):
         action.triggered.connect(lambda: self._toggle_favorite(table_id))
         menu.exec(global_pos)
 
+    def _on_reload_clicked(self):
+        """Handle Reload button click: reload IOD list from the web."""
+        self.logger.info("Reload button clicked: reloading IOD list from web.")
+        self.view.update_status_bar(message="Downloading latest IOD modules from web...")
+        # Start the worker in a background thread via the service mediator, forcing download
+        self._treeview_worker, self._treeview_thread = self.service.start_iodlist_worker(force_download=True)
+        # Connect signals for progress, loaded, and error
+        self._connect_iodlist_signals()
+
     def _toggle_favorite(self, table_id):
         try:
             if self.favorites_manager.is_favorite(table_id):
@@ -224,6 +228,37 @@ class AppController(QObject):
             for sig in signals:
                 with contextlib.suppress(TypeError):
                     sig.disconnect()
+
+    def _connect_signals(self, signal_slot_pairs):
+        """Safely (re)connect a set of Qt signals to their slots.
+
+        Args:
+            signal_slot_pairs: Iterable of (signal, slot) tuples.
+
+        This helper ensures that signals are not connected multiple times by disconnecting previous connections first.
+        This prevents duplicate slot calls.
+
+        Note:
+            By specifying Qt.QueuedConnection, we ensure that if a signal is emitted from any thread,
+            the connected slot (UI update method) will be executed in the thread that owns the receiver object.
+            In this case, both the ServiceMediator and AppController live in the main thread, so UI updates
+            are performed in the main thread, ensuring thread safety for all Qt UI operations.
+
+        """
+        signals = [pair[0] for pair in signal_slot_pairs]
+        self._safe_disconnect(*signals)
+        for signal, slot in signal_slot_pairs:
+            signal.connect(slot, Qt.QueuedConnection)
+
+    def _connect_iodlist_signals(self):
+        """(Re)connect IOD list loader signals to their handlers, safely disconnecting first."""
+        self._connect_signals(
+            [
+                (self.service.iodlist_progress_signal, self._handle_iodlist_progress),
+                (self.service.iodlist_loaded_signal, self._handle_iodlist_loaded),
+                (self.service.iodlist_error_signal, self._handle_iodlist_error),
+            ]
+        )
 
     def _handle_iod_item_clicked(
         self, index: QModelIndex, selected_item_name: QStandardItem, selected_item_kind: QStandardItem
@@ -329,11 +364,25 @@ class AppController(QObject):
             self.view.update_status_bar(f"Loading IOD modules... {percent}%")
 
     def _handle_iodlist_loaded(self, sender: object, iod_entry_list: list[IODEntry]) -> None:
-        # Initialize the mapping of already loaded iods (AnyTree node content added to treeview) by their table_id
+        # Save the mapping of already loaded iods (AnyTree node content added to treeview) by their table_id
+        loaded_children = getattr(self, "_iod_children_loaded", {}).copy()
+
+        # Initialize the mapping for this session
         self._iod_children_loaded = {}
 
         # Populate the tree model with the loaded IODs applying filters and sorting
         self.apply_filter_and_sort(iod_entry_list=iod_entry_list)
+
+        # After repopulating the treeview, re-add children for IODs by reloading from the model
+        if not self.model.new_version_available:
+            model = self.view.ui.iodTreeView.model()
+            for table_id in loaded_children.keys():
+                # Reload the IOD model (from cache if available)
+                iod_model = self.model.load_iod_model(table_id, self.logger)
+                if iod_model and hasattr(iod_model, "content") and iod_model.content:
+                    self.model.add_iod_spec_content(table_id, iod_model.content)
+                    IODTreeViewModelAdapter.populate_iod_entry_children(model, table_id, iod_model.content)
+                    self._iod_children_loaded[table_id] = iod_model.content
 
         # Update the version label with the model's version
         if self.model.version:
