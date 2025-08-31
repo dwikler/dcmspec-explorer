@@ -229,21 +229,36 @@ class AppController(QObject):
                 with contextlib.suppress(TypeError):
                     sig.disconnect()
 
+    def _connect_signals(self, signal_slot_pairs):
+        """Safely (re)connect a set of Qt signals to their slots.
+
+        Args:
+            signal_slot_pairs: Iterable of (signal, slot) tuples.
+
+        This helper ensures that signals are not connected multiple times by disconnecting previous connections first.
+        This prevents duplicate slot calls.
+
+        Note:
+            By specifying Qt.QueuedConnection, we ensure that if a signal is emitted from any thread,
+            the connected slot (UI update method) will be executed in the thread that owns the receiver object.
+            In this case, both the ServiceMediator and AppController live in the main thread, so UI updates
+            are performed in the main thread, ensuring thread safety for all Qt UI operations.
+
+        """
+        signals = [pair[0] for pair in signal_slot_pairs]
+        self._safe_disconnect(*signals)
+        for signal, slot in signal_slot_pairs:
+            signal.connect(slot, Qt.QueuedConnection)
+
     def _connect_iodlist_signals(self):
         """(Re)connect IOD list loader signals to their handlers, safely disconnecting first."""
-        self._safe_disconnect(
-            self.service.iodlist_progress_signal,
-            self.service.iodlist_loaded_signal,
-            self.service.iodlist_error_signal,
+        self._connect_signals(
+            [
+                (self.service.iodlist_progress_signal, self._handle_iodlist_progress),
+                (self.service.iodlist_loaded_signal, self._handle_iodlist_loaded),
+                (self.service.iodlist_error_signal, self._handle_iodlist_error),
+            ]
         )
-        # Connect service mediator's Qt signals to UI update methods.
-        # By specifying Qt.QueuedConnection, we ensure that if a signal is emitted from any thread,
-        # the connected slot (UI update method) will be executed in the thread that owns the receiver object.
-        # In this case, both the ServiceMediator and AppController live in the main thread, so UI updates
-        # are performed in the main thread, ensuring thread safety for all Qt UI operations.
-        self.service.iodlist_progress_signal.connect(self._handle_iodlist_progress, Qt.QueuedConnection)
-        self.service.iodlist_loaded_signal.connect(self._handle_iodlist_loaded, Qt.QueuedConnection)
-        self.service.iodlist_error_signal.connect(self._handle_iodlist_error, Qt.QueuedConnection)
 
     def _handle_iod_item_clicked(
         self, index: QModelIndex, selected_item_name: QStandardItem, selected_item_kind: QStandardItem

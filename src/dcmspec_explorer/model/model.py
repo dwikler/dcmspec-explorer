@@ -88,6 +88,15 @@ class Model:
     ) -> List[IODEntry]:
         """Load list of IODs from the DICOM PS3.3 List of Tables.
 
+        This method manages the full workflow for loading the IOD list, including:
+        - Managing a temporary file for the new download if force_download is True.
+        - Downloading or reading from cache the IOD list HTML.
+        - Parsing the IOD list and version from the HTML.
+        - Checking if the version changed.
+        - Archiving the old cache if needed.
+        - Moving the temp file to the canonical location if applicable.
+        - Updating the in-memory model.
+
         Args:
             force_download (bool): If True, force download from URL instead of using cache.
             progress_observer (ServiceProgressObserver): A progress observer to report progress.
@@ -102,74 +111,106 @@ class Model:
         standard_cache_dir = os.path.join(self.config.cache_dir, "standard")
 
         try:
+            # Step 1: Prepare temp file if needed
+            temp_file_name, temp_file_path = (None, None)
             if force_download:
-                # Create a unique temp filename for the standard folder
-                with tempfile.NamedTemporaryFile(delete=False, dir=standard_cache_dir, suffix=".html") as tmp:
-                    temp_file_name = os.path.basename(tmp.name)
-                    temp_file_path = tmp.name
-                soup = self.doc_handler.load_document(
-                    cache_file_name=temp_file_name,
-                    url=self.part3_toc_url,
-                    force_download=True,
-                    progress_observer=progress_observer,
-                )
-                # Move the temp file from standard/ to cache root to protect it from archiving
-                cache_root_temp_path = os.path.join(self.config.cache_dir, temp_file_name)
-                try:
-                    shutil.move(temp_file_path, cache_root_temp_path)
-                    temp_file_path = cache_root_temp_path  # Update for later use
-                except Exception as e:
-                    self.logger.warning(f"Failed to move temp TOC from standard to cache root: {e}")
-            else:
-                soup = self.doc_handler.load_document(
-                    cache_file_name=cache_file_name,
-                    url=self.part3_toc_url,
-                    force_download=False,
-                    progress_observer=progress_observer,
-                )
+                temp_file_name, temp_file_path = self._create_temp_iod_list_file(standard_cache_dir)
 
+            # Step 2. Download or read cache in temp or cache file in cache/standard folder
+            soup = self._load_iod_list_html(force_download, cache_file_name, temp_file_name, progress_observer)
+
+            # Step 3. If force_download, move the temp file to cache root to protect it from archiving
+            if force_download and temp_file_name:
+                temp_file_path = self._move_temp_file_to_cache_root(standard_cache_dir, temp_file_name)
+
+            # Step 4: Parse the IOD list and version from the HTML
             iod_entry_list, version = self._parse_iod_list_from_html(soup)
-            self._handle_version_change(version, force_download)
+
+            # Step 5: Check if the version changed
+            self._new_version_available = self._detect_version_changed(version)
+
+            # Step 6: Archive/move the old cache if needed
+            if force_download and self._new_version_available:
+                self._archive_previous_version_cache()
+
+            # Step 7: If a temp file was used, move it to the canonical location after archiving/version handling
+            if force_download and temp_file_path:
+                self._move_temp_iod_list_to_cache(temp_file_path, standard_cache_dir, cache_file_name)
+
+            # Step 8: Update the in-memory model and version
+            self._version = version
             self._iod_root, self._iod_dict = self._build_iods_model(iod_entry_list)
+
         except Exception as e:
             error_msg = f"Failed to load DICOM specification: \n{str(e)}"
             self.logger.error(error_msg)
             raise RuntimeError(error_msg) from e
 
-        # Move the temp file to the canonical location after archiving/version handling
-        if force_download:
-            final_toc_path = os.path.join(standard_cache_dir, cache_file_name)
-            if not os.path.exists(standard_cache_dir):
-                os.makedirs(standard_cache_dir, exist_ok=True)
-            try:
-                shutil.move(temp_file_path, final_toc_path)
-            except Exception as e:
-                self.logger.warning(f"Failed to move new TOC to {final_toc_path}: {e}")
-
         return iod_entry_list
 
-    def _handle_version_change(self, version: str, force_download: bool) -> None:
-        """Handle changes in the DICOM version.
+    def _detect_version_changed(self, new_version: str) -> bool:
+        """Detect if the DICOM version has changed compared to the current version.
 
         Args:
-            version (str): The new DICOM version.
-            force_download (bool): If True, force download from URL instead of using cache.
+            new_version (str): The new DICOM version string.
+
+        Returns:
+            bool: True if the version has changed, False otherwise.
 
         """
-        # Check if the version changed
-        self._new_version_available = self._version is not None and self._version != version
+        return self._version is not None and self._version != new_version
 
-        # If force_download and the version has changed, clear the cache
-        if force_download and self._new_version_available:
-            self.logger.info(
-                f"New DICOM version detected ({version}), clearing cache for previous version ({self._version})."
+    def _create_temp_iod_list_file(self, standard_cache_dir: str) -> Tuple[str, str]:
+        """Create a unique temp file for downloading the IOD list file in the standard cache directory.
+
+        Returns:
+            Tuple[str, str]: (temp_file_name, temp_file_path)
+
+        """
+        with tempfile.NamedTemporaryFile(delete=False, dir=standard_cache_dir, suffix=".html") as tmp:
+            temp_file_name = os.path.basename(tmp.name)
+            temp_file_path = tmp.name
+        return temp_file_name, temp_file_path
+
+    def _load_iod_list_html(
+        self,
+        force_download: bool,
+        cache_file_name: str,
+        temp_file_name: str = None,
+        progress_observer: ServiceProgressObserver = None,
+    ) -> BeautifulSoup:
+        """Download or load the IOD list HTML from cache, using a temp file if force_download is True.
+
+        This method only handles loading (download or cache read), not parsing.
+
+        Returns:
+            BeautifulSoup: The loaded HTML soup.
+
+        """
+        if not force_download or not temp_file_name:
+            return self.doc_handler.load_document(
+                cache_file_name=cache_file_name,
+                url=self.part3_toc_url,
+                force_download=False,
+                progress_observer=progress_observer,
             )
-            self._archive_previous_version_cache()
-        else:
-            self.logger.info(f"Same DICOM version detected ({version}), keeping cached files.")
+        return self.doc_handler.load_document(
+            cache_file_name=temp_file_name,
+            url=self.part3_toc_url,
+            force_download=True,
+            progress_observer=progress_observer,
+        )
 
-        # Update the version
-        self._version = version
+    def _move_temp_file_to_cache_root(self, standard_cache_dir: str, temp_file_name: str) -> str:
+        """Move the temp file from cache/standard to cache root and return the new path."""
+        cache_root_temp_path = os.path.join(self.config.cache_dir, temp_file_name)
+        src_path = os.path.join(standard_cache_dir, temp_file_name)
+        try:
+            shutil.move(src_path, cache_root_temp_path)
+            return cache_root_temp_path
+        except Exception as e:
+            self.logger.warning(f"Failed to move temp IOD list file from cache/standard to cache root: {e}")
+            return src_path
 
     def _parse_iod_list_from_html(self, soup: BeautifulSoup) -> Tuple[List[IODEntry], str]:
         """Parse the HTML soup, extract IOD list and version.
@@ -195,6 +236,16 @@ class Model:
         iod_entry_list = self._extract_iod_list(list_of_tables)
 
         return iod_entry_list, version
+
+    def _move_temp_iod_list_to_cache(self, temp_file_path: str, standard_cache_dir: str, cache_file_name: str) -> None:
+        """Move the temp IOD list file to the canonical cache location after archiving/version handling."""
+        cache_file_path = os.path.join(standard_cache_dir, cache_file_name)
+        if not os.path.exists(standard_cache_dir):
+            os.makedirs(standard_cache_dir, exist_ok=True)
+        try:
+            shutil.move(temp_file_path, cache_file_path)
+        except Exception as e:
+            self.logger.warning(f"Failed to move temp IOD list file to {cache_file_path}: {e}")
 
     def _build_iods_model(self, iod_entry_list: List[IODEntry]):
         """Build a tree model for IODs and a dict mapping table_id to IOD nodes.
