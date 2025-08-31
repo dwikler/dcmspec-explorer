@@ -472,19 +472,36 @@ class Model:
                 self.logger.warning(f"Failed to move existing archive {versioned_dir} to {backup_dir}: {e}")
 
         # Move the entire standard folder if it exists
-        if os.path.exists(standard_cache_dir):
-            os.makedirs(versioned_dir, exist_ok=True)
-            try:
-                shutil.move(standard_cache_dir, versioned_standard_dir)
-                self.logger.info(f"Moved standard cache folder to versioned folder: {versioned_standard_dir}")
-            except Exception as e:
-                self.logger.warning(f"Failed to move {standard_cache_dir} to {versioned_standard_dir}: {e}")
+        self._move_folder_if_exists(
+            src=standard_cache_dir,
+            dst=versioned_standard_dir,
+            ensure_parent=versioned_dir,
+            description="standard cache folder to versioned folder",
+        )
 
         # Move the entire model folder if it exists
-        if os.path.exists(model_cache_dir):
-            os.makedirs(versioned_dir, exist_ok=True)
+        self._move_folder_if_exists(
+            src=model_cache_dir,
+            dst=versioned_model_dir,
+            ensure_parent=versioned_dir,
+            description="model cache folder to versioned folder",
+        )
+
+    def _move_folder_if_exists(self, src: str, dst: str, ensure_parent: str = None, description: str = "") -> None:
+        """Move a folder from src to dst if it exists, creating parent if needed, and log the result.
+
+        Args:
+            src (str): Source folder path.
+            dst (str): Destination folder path.
+            ensure_parent (str, optional): Parent directory to create before moving.
+            description (str, optional): Description for logging.
+
+        """
+        if os.path.exists(src):
+            if ensure_parent:
+                os.makedirs(ensure_parent, exist_ok=True)
             try:
-                shutil.move(model_cache_dir, versioned_model_dir)
-                self.logger.info(f"Moved model cache folder to versioned folder: {versioned_model_dir}")
+                shutil.move(src, dst)
+                self.logger.info(f"Moved {description}: {src} -> {dst}")
             except Exception as e:
-                self.logger.warning(f"Failed to move {model_cache_dir} to {versioned_model_dir}: {e}")
+                self.logger.warning(f"Failed to move {description}: {src} -> {dst}: {e}")
