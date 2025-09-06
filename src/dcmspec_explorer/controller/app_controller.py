@@ -316,19 +316,23 @@ class AppController(QObject):
         details = self.model.get_node_details(selected_item_path)
 
         if details:
+            # sourcery skip: assign-if-exp, extract-method, inline-immediately-returned-variable
             ie = details.get("ie", "Unspecified")
             usage = details.get("usage", "")
             usage_display = DICOM_USAGE_MAP.get(usage, f"Other ({usage})")
             description = details.get("description", "")
+            ref_html = details.get("ref", "")
+            ref_text = self.model.get_module_ref_link(ref_html) if ref_html else ""
+
             if iod_kind == "Composite":
                 html = f"""<h1>{details.get("module", "Unknown")} Module</h1>
                     <p><span class="label">IE:</span> {ie}</p>
                     <p><span class="label">Usage:</span> {usage_display}</p>
-                    <p><span class="label">Reference:</span> {details.get("ref", "")}</p>
+                    <p><span class="label">Reference:</span> {ref_text}</p>
                     """
             else:
                 html = f"""<h1>{details.get("module", "Unknown")} Module</h1>
-                    <p><span class="label">Reference:</span> {details.get("ref", "")}</p>
+                    <p><span class="label">Reference:</span> {ref_text}</p>
                     <p><span class="label">Description:</span> {description}</p>
                     """
         else:
