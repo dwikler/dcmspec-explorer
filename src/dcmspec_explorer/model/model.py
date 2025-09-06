@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import tempfile
+import html
 from typing import List, NamedTuple, Tuple
 from urllib.parse import urljoin
 
@@ -287,18 +288,28 @@ class Model:
         node = self.get_node_by_path(node_path)
         return None if node is None else node.__dict__
 
+    import html
+
     def get_module_ref_link(self, ref_value: str) -> str:
-        """Return formatted HTML anchor for the module reference, or plain text if not available."""
+        """Return formatted HTML anchor for the module reference, or escaped plain text if not available or unsafe."""
         if not ref_value:
             return ""
         soup = BeautifulSoup(ref_value, "xml")
         anchor = soup.find("a", class_="xref")
         if anchor and anchor.has_attr("href"):
-            href = anchor["href"]
-            url = f"{self.PART3_XHTML_URL}{href}" if href.startswith("#") else href
+            href = anchor["href"].strip()
             anchor_text = anchor.get_text(strip=True)
-            return f'<a href="{url}">{anchor_text}</a>'
-        return ref_value
+            # Only allow fragment identifiers (starting with #)
+            if href.startswith("#"):
+                url = f"{self.PART3_XHTML_URL}{href}"
+                return f'<a href="{url}">{anchor_text}</a>'
+            else:
+                self.logger.warning(
+                    f"Unsafe or unexpected href in module ref: {href!r}. Escaping and displaying as plain text."
+                )
+        # Fallback: escape and display as plain text.
+        # Escaping prevents XSS (Cross-Site Scripting) if ref_value contains malicious HTML/script.
+        return html.escape(ref_value)
 
     def _create_temp_iod_list_file(self) -> Tuple[str, str]:
         """Create a unique temp file for downloading the IOD list file in the standard cache directory.

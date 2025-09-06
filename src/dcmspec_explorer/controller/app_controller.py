@@ -311,12 +311,12 @@ class AppController(QObject):
         self.view.ui.iodTreeView.expand(index)
 
     def _handle_module_item_clicked(self, selected_item_path: str, iod_kind: str) -> None:
-        # sourcery skip: assign-if-exp, extract-method, inline-immediately-returned-variable
         """Handle click on a second-level (Module) item."""
         # Get attribute details from the model using only the node_path
         details = self.model.get_node_details(selected_item_path)
 
         if details:
+            # sourcery skip: assign-if-exp, extract-method, inline-immediately-returned-variable
             ie = details.get("ie", "Unspecified")
             usage = details.get("usage", "")
             usage_display = DICOM_USAGE_MAP.get(usage, f"Other ({usage})")
