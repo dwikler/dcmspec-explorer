@@ -311,6 +311,7 @@ class AppController(QObject):
         self.view.ui.iodTreeView.expand(index)
 
     def _handle_module_item_clicked(self, selected_item_path: str, iod_kind: str) -> None:
+        # sourcery skip: assign-if-exp, extract-method, inline-immediately-returned-variable
         """Handle click on a second-level (Module) item."""
         # Get attribute details from the model using only the node_path
         details = self.model.get_node_details(selected_item_path)
@@ -320,15 +321,18 @@ class AppController(QObject):
             usage = details.get("usage", "")
             usage_display = DICOM_USAGE_MAP.get(usage, f"Other ({usage})")
             description = details.get("description", "")
+            ref_html = details.get("ref", "")
+            ref_text = self.model.get_module_ref_link(ref_html) if ref_html else ""
+
             if iod_kind == "Composite":
                 html = f"""<h1>{details.get("module", "Unknown")} Module</h1>
                     <p><span class="label">IE:</span> {ie}</p>
                     <p><span class="label">Usage:</span> {usage_display}</p>
-                    <p><span class="label">Reference:</span> {details.get("ref", "")}</p>
+                    <p><span class="label">Reference:</span> {ref_text}</p>
                     """
             else:
                 html = f"""<h1>{details.get("module", "Unknown")} Module</h1>
-                    <p><span class="label">Reference:</span> {details.get("ref", "")}</p>
+                    <p><span class="label">Reference:</span> {ref_text}</p>
                     <p><span class="label">Description:</span> {description}</p>
                     """
         else:

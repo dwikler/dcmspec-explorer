@@ -9,8 +9,8 @@ from typing import List, NamedTuple, Tuple
 from urllib.parse import urljoin
 
 from anytree import Node
-
 from bs4 import BeautifulSoup
+
 from dcmspec.config import Config
 from dcmspec.xhtml_doc_handler import XHTMLDocHandler
 from dcmspec.dom_table_spec_parser import DOMTableSpecParser
@@ -51,6 +51,7 @@ class Model:
     """Data model for DICOM specifications."""
 
     PART3_XHTML_CACHE_FILE_NAME = "Part3.xhtml"
+    PART3_XHTML_URL = "https://dicom.nema.org/medical/dicom/current/output/html/part03.html"
 
     def __init__(self, config: Config, logger: logging.Logger):
         """Initialize the data model."""
@@ -180,7 +181,7 @@ class Model:
             or None if building failed.
 
         """
-        url = "https://dicom.nema.org/medical/dicom/current/output/html/part03.html"
+        url = self.PART3_XHTML_URL
         cache_file_name = self.PART3_XHTML_CACHE_FILE_NAME
         model_file_name = f"Part3_{table_id}_expanded.json"
 
@@ -189,13 +190,17 @@ class Model:
 
         # Create the IOD specification factory
         c_iod_columns_mapping = {0: "ie", 1: "module", 2: "ref", 3: "usage"}
+        c_iod_unformatted = {0: True, 1: True, 2: False, 3: True}
         n_iod_columns_mapping = {0: "module", 1: "ref", 2: "description"}
+        n_iod_unformatted = {0: True, 1: False, 2: True}
         iod_columns_mapping = c_iod_columns_mapping if composite_iod else n_iod_columns_mapping
+        iod_unformatted = c_iod_unformatted if composite_iod else n_iod_unformatted
         iod_factory = SpecFactory(
             column_to_attr=iod_columns_mapping,
             name_attr="module",
             config=self.config,
             logger=logger,
+            parser_kwargs={"unformatted": iod_unformatted},
         )
 
         # Create the modules specification factory
@@ -281,6 +286,19 @@ class Model:
         """
         node = self.get_node_by_path(node_path)
         return None if node is None else node.__dict__
+
+    def get_module_ref_link(self, ref_value: str) -> str:
+        """Return formatted HTML anchor for the module reference, or plain text if not available."""
+        if not ref_value:
+            return ""
+        soup = BeautifulSoup(ref_value, "xml")
+        anchor = soup.find("a", class_="xref")
+        if anchor and anchor.has_attr("href"):
+            href = anchor["href"]
+            url = f"{self.PART3_XHTML_URL}{href}" if href.startswith("#") else href
+            anchor_text = anchor.get_text(strip=True)
+            return f'<a href="{url}">{anchor_text}</a>'
+        return ref_value
 
     def _create_temp_iod_list_file(self) -> Tuple[str, str]:
         """Create a unique temp file for downloading the IOD list file in the standard cache directory.
