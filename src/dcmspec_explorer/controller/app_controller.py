@@ -157,12 +157,18 @@ class AppController(QObject):
             parent_kind_item = model.itemFromIndex(parent_index.siblingAtColumn(1))
             iod_kind = parent_kind_item.text() if parent_kind_item else "Unknown"
             details = self.get_specmodel_details(selected_item_name)
-            self._handle_module_item_clicked(details, iod_kind)
+            if details is not None:
+                self._handle_module_item_clicked(details, iod_kind)
+            else:
+                self.view.set_nodetails_html(selected_item_name, "Module")
 
         else:
             # third-level (Attribute)
             details = self.get_specmodel_details(selected_item_name)
-            self._handle_attribute_item_clicked(details)
+            if details is not None:
+                self._handle_attribute_item_clicked(details)
+            else:
+                self.view.set_nodetails_html(selected_item_name, "Attribute")
 
     def get_specmodel_details(self, selected_item):
         """Return the details dict for a node in the SpecModel tree given a QStandardItem."""
@@ -175,7 +181,10 @@ class AppController(QObject):
         else:
             relative_path = full_path
         node = self.model.get_specmodel_node(table_id, relative_path)
-        return node.__dict__ if node else None
+        if node:
+            # Only include public attributes (exclude private/internal ones)
+            return {k: v for k, v in node.__dict__.items() if not k.startswith("_")}
+        return None
 
     def _on_treeview_right_click(self, index: QModelIndex, global_pos):
         """Show context menu for favorites management on top-level items."""
@@ -322,43 +331,36 @@ class AppController(QObject):
 
     def _handle_module_item_clicked(self, details: dict, iod_kind: str) -> None:
         """Handle click on a second-level (Module) item."""
-        if details:
-            ie = details.get("ie", "Unspecified")
-            usage = details.get("usage", "")
-            usage_display = DICOM_USAGE_MAP.get(usage, f"Other ({usage})")
-            description = details.get("description", "")
-            ref_html = details.get("ref", "")
-            ref_text = self.model.get_module_ref_link(ref_html) if ref_html else ""
+        ie = details.get("ie", "Unspecified")
+        usage = details.get("usage", "")
+        usage_display = DICOM_USAGE_MAP.get(usage, f"Other ({usage})")
+        description = details.get("description", "")
+        ref_html = details.get("ref", "")
+        ref_text = self.model.get_module_ref_link(ref_html) if ref_html else ""
 
-            if iod_kind == "Composite":
-                html = f"""<h1>{details.get("module", "Unknown")} Module</h1>
-                    <p><span class="label">IE:</span> {ie}</p>
-                    <p><span class="label">Usage:</span> {usage_display}</p>
-                    <p><span class="label">Reference:</span> {ref_text}</p>
-                    """
-            else:
-                html = f"""<h1>{details.get("module", "Unknown")} Module</h1>
-                    <p><span class="label">Reference:</span> {ref_text}</p>
-                    <p><span class="label">Description:</span> {description}</p>
-                    """
+        if iod_kind == "Composite":
+            html = f"""<h1>{details.get("module", "Unknown")} Module</h1>
+                <p><span class="label">IE:</span> {ie}</p>
+                <p><span class="label">Usage:</span> {usage_display}</p>
+                <p><span class="label">Reference:</span> {ref_text}</p>
+                """
         else:
-            # Fallback: only show the attribute
-            html = "<h1>Module</h1>"
+            html = f"""<h1>{details.get("module", "Unknown")} Module</h1>
+                <p><span class="label">Reference:</span> {ref_text}</p>
+                <p><span class="label">Description:</span> {description}</p>
+                """
+
         self.view.set_details_html(html)
 
     def _handle_attribute_item_clicked(self, details: dict) -> None:
         """Handle click on a third-level or deeper (Attribute) item."""
-        if details:
-            elem_type = details.get("elem_type", "Unspecified")
-            type_display = DICOM_TYPE_MAP.get(elem_type, f"Other ({elem_type})")
-            html = f"""<h1>{details.get("elem_name", "Unknown")} Attribute</h1>
-                <p><span class="label">Tag:</span> {details.get("elem_tag", "")}</p>
-                <p><span class="label">Type:</span> {type_display}</p>
-                <p><span class="label">Description:</span> {details.get("elem_description", "")}</p>
-                """
-        else:
-            # Fallback: only show the attribute
-            html = "<h1>Attribute</h1>"
+        elem_type = details.get("elem_type", "Unspecified")
+        type_display = DICOM_TYPE_MAP.get(elem_type, f"Other ({elem_type})")
+        html = f"""<h1>{details.get("elem_name", "Unknown")} Attribute</h1>
+            <p><span class="label">Tag:</span> {details.get("elem_tag", "")}</p>
+            <p><span class="label">Type:</span> {type_display}</p>
+            <p><span class="label">Description:</span> {details.get("elem_description", "")}</p>
+            """
         self.view.set_details_html(html)
 
     def _handle_iodlist_progress(self, sender: object, progress: Progress) -> None:
@@ -377,7 +379,7 @@ class AppController(QObject):
         # After repopulating the treeview, re-add children for IODs by using the loaded SpecModels
         if not self.model.new_version_available:
             model = self.view.ui.iodTreeView.model()
-            for table_id, iod_model in self.model._iod_specmodels.items():
+            for table_id, iod_model in self.model.iod_specmodels.items():
                 if iod_model and hasattr(iod_model, "content") and iod_model.content:
                     IODTreeViewModelAdapter.populate_iod_entry_children(model, table_id, iod_model.content)
 

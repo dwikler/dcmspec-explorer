@@ -91,6 +91,11 @@ class Model:
         return list(self._iod_entries.values())
 
     @property
+    def iod_specmodels(self) -> dict[str, Any]:
+        """Return a dictionary of all loaded IOD SpecModel instances, keyed by table_id."""
+        return self._iod_specmodels
+
+    @property
     def new_version_available(self) -> bool:
         """Return True if the DICOM version changed after the last load."""
         return self._new_version_available
@@ -155,7 +160,7 @@ class Model:
 
             # Step 8: Update the in-memory model and version
             self._version = version
-            _, self._iod_entries = self._build_iods_model(iod_entry_list)
+            self._iod_entries = self._build_iods_model(iod_entry_list)
 
         except Exception as e:
             error_msg = f"Failed to load DICOM specification: \n{str(e)}"
@@ -169,7 +174,8 @@ class Model:
     ) -> Any:
         """Load the IOD model for the given table_id using the IODSpecBuilder API.
 
-        This method uses the IODSpecBuilder.build_from_url() method which handles:
+        If the model is not already loaded in memory, build it using
+        the dcmspec IODSpecBuilder class method which handles:
         - Cache detection and loading (fast for cached models)
         - Web download and parsing (slower for non-cached models)
         - Model building and JSON serialization
@@ -184,6 +190,11 @@ class Model:
             or None if building failed.
 
         """
+        # Return in-memory model if already loaded
+        if table_id in self.iod_specmodels:
+            return self.iod_specmodels[table_id]
+
+        # Define Part 3 URL and file names
         url = self.PART3_XHTML_URL
         cache_file_name = self.PART3_XHTML_CACHE_FILE_NAME
         model_file_name = f"Part3_{table_id}_expanded.json"
@@ -251,7 +262,7 @@ class Model:
             SpecModel node or None if not found.
 
         """
-        specmodel = self._iod_specmodels.get(table_id)
+        specmodel = self.iod_specmodels.get(table_id)
         if not specmodel or not hasattr(specmodel, "content"):
             return None
         node = specmodel.content
@@ -461,7 +472,7 @@ class Model:
             except Exception as e:
                 self.logger.warning(f"Failed to move {description}: {src} -> {dst}: {e}")
 
-    def _build_iods_model(self, iod_entry_list: List[IODEntry]) -> Tuple[None, dict[str, IODEntry]]:
+    def _build_iods_model(self, iod_entry_list: List[IODEntry]) -> dict[str, IODEntry]:
         """Build a dict mapping table_id to IODEntry objects.
 
         Args:
@@ -471,8 +482,7 @@ class Model:
             dict: Dict mapping table_id to the corresponding IODEntry.
 
         """
-        iod_entries = {iod.table_id: iod for iod in iod_entry_list}
-        return None, iod_entries
+        return {iod.table_id: iod for iod in iod_entry_list}
 
     def _extract_iod_list(self, list_of_tables) -> List[IODEntry]:
         """Extract list of IODs from the list of tables section.

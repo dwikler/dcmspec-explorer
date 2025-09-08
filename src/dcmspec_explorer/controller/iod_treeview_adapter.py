@@ -38,7 +38,7 @@ class IODTreeViewModelAdapter:
     def build_treeview_model(
         self,
         iod_entry_list: List[IODEntry],
-        model: Model,
+        data_model: Model,
         search_text: str = "",
         sort_column: Optional[int] = None,
         sort_reverse: bool = False,
@@ -51,7 +51,7 @@ class IODTreeViewModelAdapter:
 
         Args:
             iod_entry_list (List[IODEntry]): The list of IOD entries to display.
-            model (Model): The main data model containing already loaded IOD SpecModels.
+            data_model (Model): The main data model containing already loaded IOD SpecModels.
             search_text (str, optional): Text to filter the displayed entries.
             sort_column (int, optional): Column index to sort by.
             sort_reverse (bool, optional): Whether to reverse the sort order.
@@ -86,23 +86,23 @@ class IODTreeViewModelAdapter:
                 )
             # No else needed as sorting on other columns is not supported
 
-        # Get already loaded IODs from the model's _iod_specmodels
+        # Get already loaded IODs from the data_model's iod_specmodels property
         loaded_children = {
             table_id: iod_model.content
-            for table_id, iod_model in getattr(model, "_iod_specmodels", {}).items()
+            for table_id, iod_model in data_model.iod_specmodels.items()
             if hasattr(iod_model, "content") and iod_model.content
         }
 
-        treeview_model = self.populate_treeview_model_top_level(filtered)
+        treeview_qt_model = self.populate_treeview_model_top_level(filtered)
         selected_row = None
-        for row in range(treeview_model.rowCount()):
-            item = treeview_model.item(row, 0)
+        for row in range(treeview_qt_model.rowCount()):
+            item = treeview_qt_model.item(row, 0)
             table_id = item.data(TABLE_ID_ROLE)
             if loaded_children and table_id in loaded_children:
                 self.populate_treeview_model_item(item, loaded_children[table_id])
             if selected_table_id and table_id == selected_table_id:
                 selected_row = row
-        return treeview_model, selected_row
+        return treeview_qt_model, selected_row
 
     def populate_treeview_model_top_level(self, iod_list: List[IODEntry]) -> QStandardItemModel:
         """Convert a list of IODEntry objects into a QStandardItemModel for use with a QTreeView.
