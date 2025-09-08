@@ -112,6 +112,12 @@ class MainWindow(QMainWindow):
         html = f"<style>{self.details_css}</style>\n{html_body}"
         self.ui.detailsTextBrowser.setHtml(html)
 
+    def set_nodetails_html(self, selected_item_name, kind: str) -> None:
+        """Set a fallback HTML message for missing details, using the selected QStandardItem and kind."""
+        item_name = selected_item_name.text() if selected_item_name else "Unknown"
+        html = f"<h1>{item_name} {kind}</h1><p>No details available.</p>"
+        self.set_details_html(html)
+
     def showEvent(self, event: QShowEvent) -> None:
         """Override the Qt showEvent to emit a custom signal after the window is shown.
 

@@ -5,7 +5,7 @@ from anytree import PreOrderIter, Node
 
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon
 
-from dcmspec_explorer.model.model import IODEntry
+from dcmspec_explorer.model.model import IODEntry, Model
 from dcmspec_explorer.qt.qt_roles import TABLE_ID_ROLE, TABLE_URL_ROLE, NODE_PATH_ROLE, IS_FAVORITE_ROLE
 
 # Define mapping of column names to their indices
@@ -25,13 +25,23 @@ class IODTreeViewModelAdapter:
         self.favorites_manager = favorites_manager
         self.heart_icon = heart_icon
 
+    @staticmethod
+    def get_table_id_for_item(item: QStandardItem) -> Optional[str]:
+        """Walk up the treeview item chain to find the table_id from the top-level IOD item."""
+        while item is not None:
+            table_id = item.data(TABLE_ID_ROLE)
+            if table_id:
+                return table_id
+            item = item.parent()
+        return None
+
     def build_treeview_model(
         self,
         iod_entry_list: List[IODEntry],
+        data_model: Model,
         search_text: str = "",
         sort_column: Optional[int] = None,
         sort_reverse: bool = False,
-        loaded_children: Optional[dict] = None,
         selected_table_id: Optional[str] = None,
     ) -> Tuple[QStandardItemModel, Optional[int]]:
         """Build a QStandardItemModel for the treeview.
@@ -41,10 +51,10 @@ class IODTreeViewModelAdapter:
 
         Args:
             iod_entry_list (List[IODEntry]): The list of IOD entries to display.
+            data_model (Model): The main data model containing already loaded IOD SpecModels.
             search_text (str, optional): Text to filter the displayed entries.
             sort_column (int, optional): Column index to sort by.
             sort_reverse (bool, optional): Whether to reverse the sort order.
-            loaded_children (dict, optional): Preloaded child items for the tree.
             selected_table_id (str, optional): Table ID of the selected item.
 
         Returns:
@@ -76,16 +86,23 @@ class IODTreeViewModelAdapter:
                 )
             # No else needed as sorting on other columns is not supported
 
-        model = self.populate_treeview_model_top_level(filtered)
+        # Get already loaded IODs from the data_model's iod_specmodels property
+        loaded_children = {
+            table_id: iod_model.content
+            for table_id, iod_model in data_model.iod_specmodels.items()
+            if hasattr(iod_model, "content") and iod_model.content
+        }
+
+        treeview_qt_model = self.populate_treeview_model_top_level(filtered)
         selected_row = None
-        for row in range(model.rowCount()):
-            item = model.item(row, 0)
+        for row in range(treeview_qt_model.rowCount()):
+            item = treeview_qt_model.item(row, 0)
             table_id = item.data(TABLE_ID_ROLE)
             if loaded_children and table_id in loaded_children:
                 self.populate_treeview_model_item(item, loaded_children[table_id])
             if selected_table_id and table_id == selected_table_id:
                 selected_row = row
-        return model, selected_row
+        return treeview_qt_model, selected_row
 
     def populate_treeview_model_top_level(self, iod_list: List[IODEntry]) -> QStandardItemModel:
         """Convert a list of IODEntry objects into a QStandardItemModel for use with a QTreeView.

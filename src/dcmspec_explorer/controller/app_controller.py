@@ -146,9 +146,6 @@ class AppController(QObject):
         selected_item_name = model.itemFromIndex(index.siblingAtColumn(0))
         selected_item_kind = model.itemFromIndex(index.siblingAtColumn(1))
 
-        # Retrieve the node path from the selected item data
-        selected_item_node_path = selected_item_name.data(NODE_PATH_ROLE) if selected_item_name else None
-
         # Check the clicked item level and take appropriate action
         if index.parent().isValid() is False:
             # top-level (IOD)
@@ -156,16 +153,38 @@ class AppController(QObject):
 
         elif index.parent().parent().isValid() is False:
             # second-level (Module)
-            # Get the parent (IOD) kind from the parent row, column 1
             parent_index = index.parent()
-            model = index.model()
             parent_kind_item = model.itemFromIndex(parent_index.siblingAtColumn(1))
             iod_kind = parent_kind_item.text() if parent_kind_item else "Unknown"
-            self._handle_module_item_clicked(selected_item_node_path, iod_kind)
+            details = self.get_specmodel_details(selected_item_name)
+            if details is not None:
+                self._handle_module_item_clicked(details, iod_kind)
+            else:
+                self.view.set_nodetails_html(selected_item_name, "Module")
 
         else:
             # third-level (Attribute)
-            self._handle_attribute_item_clicked(selected_item_node_path)
+            details = self.get_specmodel_details(selected_item_name)
+            if details is not None:
+                self._handle_attribute_item_clicked(details)
+            else:
+                self.view.set_nodetails_html(selected_item_name, "Attribute")
+
+    def get_specmodel_details(self, selected_item):
+        """Return the details dict for a node in the SpecModel tree given a QStandardItem."""
+        table_id = self.treeview_adapter.get_table_id_for_item(selected_item)
+        full_path = selected_item.data(NODE_PATH_ROLE) or ""
+        path_parts = full_path.split("/") if full_path else []
+        # Skip "content" if present
+        if path_parts and path_parts[0] == "content":
+            relative_path = "/".join(path_parts[1:])
+        else:
+            relative_path = full_path
+        node = self.model.get_specmodel_node(table_id, relative_path)
+        if node:
+            # Only include public attributes (exclude private/internal ones)
+            return {k: v for k, v in node.__dict__.items() if not k.startswith("_")}
+        return None
 
     def _on_treeview_right_click(self, index: QModelIndex, global_pos):
         """Show context menu for favorites management on top-level items."""
@@ -310,52 +329,38 @@ class AppController(QObject):
         # Set expand property for the selected iod item in the view (will be effective when item will be populated)
         self.view.ui.iodTreeView.expand(index)
 
-    def _handle_module_item_clicked(self, selected_item_path: str, iod_kind: str) -> None:
+    def _handle_module_item_clicked(self, details: dict, iod_kind: str) -> None:
         """Handle click on a second-level (Module) item."""
-        # Get attribute details from the model using only the node_path
-        details = self.model.get_node_details(selected_item_path)
+        ie = details.get("ie", "Unspecified")
+        usage = details.get("usage", "")
+        usage_display = DICOM_USAGE_MAP.get(usage, f"Other ({usage})")
+        description = details.get("description", "")
+        ref_html = details.get("ref", "")
+        ref_text = self.model.get_module_ref_link(ref_html) if ref_html else ""
 
-        if details:
-            # sourcery skip: assign-if-exp, extract-method, inline-immediately-returned-variable
-            ie = details.get("ie", "Unspecified")
-            usage = details.get("usage", "")
-            usage_display = DICOM_USAGE_MAP.get(usage, f"Other ({usage})")
-            description = details.get("description", "")
-            ref_html = details.get("ref", "")
-            ref_text = self.model.get_module_ref_link(ref_html) if ref_html else ""
-
-            if iod_kind == "Composite":
-                html = f"""<h1>{details.get("module", "Unknown")} Module</h1>
-                    <p><span class="label">IE:</span> {ie}</p>
-                    <p><span class="label">Usage:</span> {usage_display}</p>
-                    <p><span class="label">Reference:</span> {ref_text}</p>
-                    """
-            else:
-                html = f"""<h1>{details.get("module", "Unknown")} Module</h1>
-                    <p><span class="label">Reference:</span> {ref_text}</p>
-                    <p><span class="label">Description:</span> {description}</p>
-                    """
-        else:
-            # Fallback: only show the attribute path
-            html = f"""<h1>{selected_item_path} Module</h1>"""
-        self.view.set_details_html(html)
-
-    def _handle_attribute_item_clicked(self, selected_item_path: str) -> None:
-        """Handle click on a third-level or deeper (Attribute) item."""
-        # Get attribute details from the model using only the node_path
-        details = self.model.get_node_details(selected_item_path)
-
-        if details:
-            elem_type = details.get("elem_type", "Unspecified")
-            type_display = DICOM_TYPE_MAP.get(elem_type, f"Other ({elem_type})")
-            html = f"""<h1>{details.get("elem_name", "Unknown")} Attribute</h1>
-                <p><span class="label">Tag:</span> {details.get("elem_tag", "")}</p>
-                <p><span class="label">Type:</span> {type_display}</p>
-                <p><span class="label">Description:</span> {details.get("elem_description", "")}</p>
+        if iod_kind == "Composite":
+            html = f"""<h1>{details.get("module", "Unknown")} Module</h1>
+                <p><span class="label">IE:</span> {ie}</p>
+                <p><span class="label">Usage:</span> {usage_display}</p>
+                <p><span class="label">Reference:</span> {ref_text}</p>
                 """
         else:
-            # Fallback: only show the attribute path
-            html = f"""<h1>{selected_item_path} Attribute</h1>"""
+            html = f"""<h1>{details.get("module", "Unknown")} Module</h1>
+                <p><span class="label">Reference:</span> {ref_text}</p>
+                <p><span class="label">Description:</span> {description}</p>
+                """
+
+        self.view.set_details_html(html)
+
+    def _handle_attribute_item_clicked(self, details: dict) -> None:
+        """Handle click on a third-level or deeper (Attribute) item."""
+        elem_type = details.get("elem_type", "Unspecified")
+        type_display = DICOM_TYPE_MAP.get(elem_type, f"Other ({elem_type})")
+        html = f"""<h1>{details.get("elem_name", "Unknown")} Attribute</h1>
+            <p><span class="label">Tag:</span> {details.get("elem_tag", "")}</p>
+            <p><span class="label">Type:</span> {type_display}</p>
+            <p><span class="label">Description:</span> {details.get("elem_description", "")}</p>
+            """
         self.view.set_details_html(html)
 
     def _handle_iodlist_progress(self, sender: object, progress: Progress) -> None:
@@ -368,25 +373,15 @@ class AppController(QObject):
             self.view.update_status_bar(f"Loading IOD modules... {percent}%")
 
     def _handle_iodlist_loaded(self, sender: object, iod_entry_list: list[IODEntry]) -> None:
-        # Save the mapping of already loaded iods (AnyTree node content added to treeview) by their table_id
-        loaded_children = getattr(self, "_iod_children_loaded", {}).copy()
-
-        # Initialize the mapping for this session
-        self._iod_children_loaded = {}
-
         # Populate the tree model with the loaded IODs applying filters and sorting
         self.apply_filter_and_sort(iod_entry_list=iod_entry_list)
 
-        # After repopulating the treeview, re-add children for IODs by reloading from the model
+        # After repopulating the treeview, re-add children for IODs by using the loaded SpecModels
         if not self.model.new_version_available:
             model = self.view.ui.iodTreeView.model()
-            for table_id in loaded_children.keys():
-                # Reload the IOD model (from cache if available)
-                iod_model = self.model.load_iod_model(table_id, self.logger)
+            for table_id, iod_model in self.model.iod_specmodels.items():
                 if iod_model and hasattr(iod_model, "content") and iod_model.content:
-                    self.model.add_iod_spec_content(table_id, iod_model.content)
                     IODTreeViewModelAdapter.populate_iod_entry_children(model, table_id, iod_model.content)
-                    self._iod_children_loaded[table_id] = iod_model.content
 
         # Update the version label with the model's version
         if self.model.version:
@@ -414,14 +409,6 @@ class AppController(QObject):
 
     def _handle_iodmodel_loaded(self, sender: object, iod_model: object, table_id: str) -> None:
         if iod_model and hasattr(iod_model, "content"):
-            # Add the loaded IOD content to the model
-            self.model.add_iod_spec_content(table_id, iod_model.content)
-
-            # Remember that this IOD's children are loaded
-            if not hasattr(self, "_iod_children_loaded"):
-                self._iod_children_loaded = {}
-            self._iod_children_loaded[table_id] = iod_model.content
-
             # Find the parent item in the current treeview model
             model = self.view.ui.iodTreeView.model()
             success = IODTreeViewModelAdapter.populate_iod_entry_children(model, table_id, iod_model.content)
@@ -475,14 +462,13 @@ class AppController(QObject):
         search_text = self.view.ui.searchLineEdit.text()
         sort_column = self.sort_column
         sort_reverse = self.sort_reverse
-        loaded_children = getattr(self, "_iod_children_loaded", {})
 
         qt_tree_model, selected_row = self.treeview_adapter.build_treeview_model(
             iod_entry_list=iod_entry_list_to_display,
+            model=self.model,
             search_text=search_text,
             sort_column=sort_column,
             sort_reverse=sort_reverse,
-            loaded_children=loaded_children,
             selected_table_id=selected_table_id,
         )
 
