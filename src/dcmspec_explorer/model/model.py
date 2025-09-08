@@ -6,10 +6,9 @@ import re
 import shutil
 import tempfile
 import html
-from typing import List, NamedTuple, Tuple
+from typing import List, NamedTuple, Tuple, Any, Optional
 from urllib.parse import urljoin
 
-from anytree import Node
 from bs4 import BeautifulSoup
 
 from dcmspec.config import Config
@@ -49,13 +48,25 @@ class IODEntry(NamedTuple):
 
 
 class Model:
-    """Data model for DICOM specifications."""
+    """Data model for DICOM specifications.
+
+    This class loads, parses, and manages the in-memory representation of DICOM IODs.
+
+    Attributes:
+        _iod_entries: Dictionary mapping table_id to IODEntry objects for fast lookup.
+        _iod_specmodels: Dictionary mapping table_id to loaded SpecModel instances.
+
+    """
 
     PART3_XHTML_CACHE_FILE_NAME = "Part3.xhtml"
     PART3_XHTML_URL = "https://dicom.nema.org/medical/dicom/current/output/html/part03.html"
 
     def __init__(self, config: Config, logger: logging.Logger):
-        """Initialize the data model."""
+        """Initialize the data model.
+
+        _iod_entries: Dictionary mapping table_id to IODEntry objects for fast lookup.
+        _iod_specmodels: Dictionary mapping table_id to loaded SpecModel instances (set by load_iod_model)
+        """
         self.config = config
         self.logger = logger
         # URL for DICOM Part 3 Table of Contents
@@ -68,37 +79,26 @@ class Model:
         self._version = None
         self._new_version_available = False
 
-    @property
-    def version(self):
-        """Return the DICOM version string for the loaded iod_list."""
-        return self._version
-
-    @property
-    def new_version_available(self):
-        """Return True if the DICOM version changed after the last load."""
-        return self._new_version_available
+        # Initialize the IOD entries and spec models dictionaries
+        self._iod_entries = {}  # Dict mapping table_id to IODEntry objects
+        self._iod_specmodels = {}  # Dict mapping table_id to loaded SpecModel instances
 
     @property
     def iod_list(self) -> List[IODEntry]:
         """Return the current IOD list as a list of IODEntry objects."""
-        if not hasattr(self, "_iod_dict") or not self._iod_dict:
+        if not hasattr(self, "_iod_entries") or not self._iod_entries:
             return []
-        return [IODEntry(node.name, node.table_id, node.table_url, node.iod_kind) for node in self._iod_dict.values()]
+        return list(self._iod_entries.values())
 
-    def _standard_cache_dir(self) -> str:
-        return os.path.join(self.config.cache_dir, "standard")
+    @property
+    def new_version_available(self) -> bool:
+        """Return True if the DICOM version changed after the last load."""
+        return self._new_version_available
 
-    def _model_cache_dir(self) -> str:
-        return os.path.join(self.config.cache_dir, "model")
-
-    def _versioned_dir(self, version: str) -> str:
-        return os.path.join(self.config.cache_dir, version)
-
-    def _versioned_standard_dir(self, version: str) -> str:
-        return os.path.join(self._versioned_dir(version), "standard")
-
-    def _versioned_model_dir(self, version: str) -> str:
-        return os.path.join(self._versioned_dir(version), "model")
+    @property
+    def version(self) -> Optional[str]:
+        """Return the DICOM version string for the loaded iod_list."""
+        return self._version
 
     def load_iod_list(
         self, force_download: bool = False, progress_observer: ServiceProgressObserver = None
@@ -155,7 +155,7 @@ class Model:
 
             # Step 8: Update the in-memory model and version
             self._version = version
-            self._iod_root, self._iod_dict = self._build_iods_model(iod_entry_list)
+            _, self._iod_entries = self._build_iods_model(iod_entry_list)
 
         except Exception as e:
             error_msg = f"Failed to load DICOM specification: \n{str(e)}"
@@ -164,7 +164,9 @@ class Model:
 
         return iod_entry_list
 
-    def load_iod_model(self, table_id: str, logger: logging.Logger, progress_observer: ServiceProgressObserver = None):
+    def load_iod_model(
+        self, table_id: str, logger: logging.Logger, progress_observer: ServiceProgressObserver = None
+    ) -> Any:
         """Load the IOD model for the given table_id using the IODSpecBuilder API.
 
         This method uses the IODSpecBuilder.build_from_url() method which handles:
@@ -225,8 +227,8 @@ class Model:
             logger=logger,
         )
 
-        # Build and return the model
-        return builder.build_from_url(
+        # Build and store the model in memory
+        iod_model = builder.build_from_url(
             url=url,
             cache_file_name=cache_file_name,
             json_file_name=model_file_name,
@@ -234,44 +236,35 @@ class Model:
             force_download=False,
             progress_observer=progress_observer,
         )
+        self._iod_specmodels[table_id] = iod_model
 
-    def add_iod_spec_content(self, table_id, iod_content):
-        """Add the loaded IOD specification content (AnyTree node) as a child of its IOD node.
+        return iod_model
 
-        Args:
-            table_id (str): The table identifier (e.g., "table_A.49-1") of the IOD node
-            iod_content (AnyTree node): The loaded IOD specification content to add
-
-        """
-        iod_node = self._iod_dict.get(table_id)
-        if iod_node and iod_content:
-            iod_content.parent = iod_node
-
-    def get_node_by_path(self, node_path):
-        """Return the AnyTree node given its full path in the model.
+    def get_specmodel_node(self, table_id: str, relative_path: str) -> Any:
+        """Return the node from the loaded SpecModel tree given a table_id and a relative path.
 
         Args:
-            node_path (str): The full path to the node (e.g., "IOD List/Some IOD/Some Module/Some Attribute").
+            table_id (str): The table_id of the IOD (e.g., "table_A.49-1").
+            relative_path (str): The path from the SpecModel root, e.g., "Module/Attribute".
 
         Returns:
-            AnyTree node or None if not found.
+            SpecModel node or None if not found.
 
         """
-        if not self._iod_root or not node_path:
+        specmodel = self._iod_specmodels.get(table_id)
+        if not specmodel or not hasattr(specmodel, "content"):
             return None
-
-        # Split the path and traverse from the root
-        path_parts = node_path.split("/")
-        node = self._iod_root
-        for part in path_parts[1:]:  # skip "IOD List" (the root itself)
-            node = next((child for child in node.children if child.name == part), None)
+        node = specmodel.content
+        if not relative_path:
+            return node
+        for part in relative_path.split("/"):
+            children = getattr(node, "children", [])
+            node = next((child for child in children if getattr(child, "name", None) == part), None)
             if node is None:
                 return None
-
-        # Return the node's attributes as a dict
         return node
 
-    def get_node_details(self, node_path):
+    def get_node_details(self, node_path: str) -> Optional[dict]:
         """Return all attributes of an Anytree node given its full path in the model.
 
         This method locates the node in the IOD tree using the provided node_path,
@@ -287,8 +280,6 @@ class Model:
         """
         node = self.get_node_by_path(node_path)
         return None if node is None else node.__dict__
-
-    import html
 
     def get_module_ref_link(self, ref_value: str) -> str:
         """Return formatted HTML anchor for the module reference, or escaped plain text if not available or unsafe."""
@@ -410,7 +401,7 @@ class Model:
         except Exception as e:
             self.logger.warning(f"Failed to move temp IOD list file to {cache_file_path}: {e}")
 
-    def _archive_previous_version_cache(self):
+    def _archive_previous_version_cache(self) -> None:
         """Move the entire standard and model cache folders to a versioned cache/<old_version>/ folder."""
         prev_version = self._version
         if not prev_version:
@@ -470,31 +461,18 @@ class Model:
             except Exception as e:
                 self.logger.warning(f"Failed to move {description}: {src} -> {dst}: {e}")
 
-    def _build_iods_model(self, iod_entry_list: List[IODEntry]):
-        """Build a tree model for IODs and a dict mapping table_id to IOD nodes.
-
-        The tree structure supports later addition of modules and attributes as children of each IOD node.
-        The dict allows fast lookup of IOD nodes by table_id.
+    def _build_iods_model(self, iod_entry_list: List[IODEntry]) -> Tuple[None, dict[str, IODEntry]]:
+        """Build a dict mapping table_id to IODEntry objects.
 
         Args:
             iod_entry_list (List[IODEntry]): List of IODEntry objects.
 
         Returns:
-            Tuple[Any, dict]: (iod_root, iod_dict)
-                iod_root: The AnyTree root node for all IODs.
-                iod_dict: Dict mapping table_id to the corresponding IOD node.
+            dict: Dict mapping table_id to the corresponding IODEntry.
 
         """
-        iod_root = Node("IOD List")
-        iod_dict = {}
-        for iod in iod_entry_list:
-            # Create a node for each IOD and attach it to the root
-            iod_node = Node(
-                iod.name, parent=iod_root, table_id=iod.table_id, table_url=iod.table_url, iod_kind=iod.kind
-            )
-            # Store the node in the dict for fast lookup by table_id
-            iod_dict[iod.table_id] = iod_node
-        return iod_root, iod_dict
+        iod_entries = {iod.table_id: iod for iod in iod_entry_list}
+        return None, iod_entries
 
     def _extract_iod_list(self, list_of_tables) -> List[IODEntry]:
         """Extract list of IODs from the list of tables section.
@@ -547,3 +525,18 @@ class Model:
                     iod_entry_list.append(IODEntry(iod_name, table_id, table_url, iod_kind))
 
         return iod_entry_list
+
+    def _standard_cache_dir(self) -> str:
+        return os.path.join(self.config.cache_dir, "standard")
+
+    def _model_cache_dir(self) -> str:
+        return os.path.join(self.config.cache_dir, "model")
+
+    def _versioned_dir(self, version: str) -> str:
+        return os.path.join(self.config.cache_dir, version)
+
+    def _versioned_standard_dir(self, version: str) -> str:
+        return os.path.join(self._versioned_dir(version), "standard")
+
+    def _versioned_model_dir(self, version: str) -> str:
+        return os.path.join(self._versioned_dir(version), "model")
