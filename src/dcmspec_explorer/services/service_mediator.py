@@ -61,11 +61,11 @@ class BaseServiceMediator(QObject):
         try:
             self._worker = worker_cls(logger=self.logger, event_queue=self._event_queue, **worker_kwargs)
         except Exception as exc:
-            self.logger.exception("Failed to instantiate worker: %s", worker_cls.__name__)
+            self.logger.exception(f"Failed to instantiate worker: {worker_cls.__name__}")
             raise RuntimeError(f"Worker could not be instantiated: {worker_cls.__name__}") from exc
 
         if self._worker is None:
-            self.logger.error("Worker class %s returned None on instantiation.", worker_cls.__name__)
+            self.logger.error(f"Worker class {worker_cls.__name__} returned None on instantiation.")
             raise RuntimeError(f"Worker could not be instantiated: {worker_cls.__name__}")
 
         self._thread = threading.Thread(target=self._worker.run, daemon=True)
