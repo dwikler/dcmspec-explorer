@@ -58,9 +58,15 @@ class BaseServiceMediator(QObject):
     def start_worker(self, worker_cls: type, **worker_kwargs: Any) -> Tuple[Any, threading.Thread]:
         """Start the given worker in a background thread and begin polling its event queue."""
         self._event_queue = queue.Queue()
-        self._worker = worker_cls(logger=self.logger, event_queue=self._event_queue, **worker_kwargs)
+        try:
+            self._worker = worker_cls(logger=self.logger, event_queue=self._event_queue, **worker_kwargs)
+        except Exception as exc:
+            self.logger.exception("Failed to instantiate worker: %s", worker_cls.__name__)
+            raise RuntimeError(f"Worker could not be instantiated: {worker_cls.__name__}") from exc
+
         if self._worker is None:
-            raise RuntimeError("Worker could not be instantiated.")
+            self.logger.error("Worker class %s returned None on instantiation.", worker_cls.__name__)
+            raise RuntimeError(f"Worker could not be instantiated: {worker_cls.__name__}")
 
         self._thread = threading.Thread(target=self._worker.run, daemon=True)
         self._thread.start()
