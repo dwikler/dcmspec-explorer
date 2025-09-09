@@ -108,6 +108,9 @@ class AppController(QObject):
         self.sort_column: Optional[int] = None  # No sorting on first load
         self.sort_reverse: bool = False
 
+        # Initialize progress dialog attribute (None when not used)
+        self.progress_dialog: Optional[LoadIODDialog] = None
+
         self._iodmodel_loaded_call_count = 0
 
     def run(self) -> None:
@@ -156,7 +159,7 @@ class AppController(QObject):
             parent_index = index.parent()
             parent_kind_item = model.itemFromIndex(parent_index.siblingAtColumn(1))
             iod_kind = parent_kind_item.text() if parent_kind_item else "Unknown"
-            details = self.get_specmodel_details(selected_item_name)
+            details = self.get_selected_item_details(selected_item_name)
             if details is not None:
                 self._handle_module_item_clicked(details, iod_kind)
             else:
@@ -164,15 +167,17 @@ class AppController(QObject):
 
         else:
             # third-level (Attribute)
-            details = self.get_specmodel_details(selected_item_name)
+            details = self.get_selected_item_details(selected_item_name)
             if details is not None:
                 self._handle_attribute_item_clicked(details)
             else:
                 self.view.set_nodetails_html(selected_item_name, "Attribute")
 
-    def get_specmodel_details(self, selected_item):
-        """Return the details dict for a node in the SpecModel tree given a QStandardItem."""
+    def get_selected_item_details(self, selected_item: QStandardItem) -> Optional[dict]:
+        """Return SpecModel node attributes for the selected treeview item."""
         table_id = self.treeview_adapter.get_table_id_for_item(selected_item)
+        if table_id is None:
+            return None
         full_path = selected_item.data(NODE_PATH_ROLE) or ""
         path_parts = full_path.split("/") if full_path else []
         # Skip "content" if present
@@ -180,11 +185,7 @@ class AppController(QObject):
             relative_path = "/".join(path_parts[1:])
         else:
             relative_path = full_path
-        node = self.model.get_specmodel_node(table_id, relative_path)
-        if node:
-            # Only include public attributes (exclude private/internal ones)
-            return {k: v for k, v in node.__dict__.items() if not k.startswith("_")}
-        return None
+        return self.model.get_node_public_attrs(table_id, relative_path)
 
     def _on_treeview_right_click(self, index: QModelIndex, global_pos):
         """Show context menu for favorites management on top-level items."""
