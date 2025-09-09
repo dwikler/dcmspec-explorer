@@ -465,7 +465,7 @@ class AppController(QObject):
 
         qt_tree_model, selected_row = self.treeview_adapter.build_treeview_model(
             iod_entry_list=iod_entry_list_to_display,
-            model=self.model,
+            data_model=self.model,
             search_text=search_text,
             sort_column=sort_column,
             sort_reverse=sort_reverse,
