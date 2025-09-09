@@ -16,6 +16,7 @@ from dcmspec.xhtml_doc_handler import XHTMLDocHandler
 from dcmspec.dom_table_spec_parser import DOMTableSpecParser
 from dcmspec.iod_spec_builder import IODSpecBuilder
 from dcmspec.spec_factory import SpecFactory
+from dcmspec.spec_model import SpecModel
 
 from dcmspec_explorer.services.progress_observer import ServiceProgressObserver
 
@@ -76,12 +77,12 @@ class Model:
         # Initialize DOM parser for DICOM standard version extraction
         self.dom_parser = DOMTableSpecParser(logger=self.logger)
         # Initialize DICOM version tracking attributes
-        self._version = None
+        self._version: Optional[str] = None
         self._new_version_available = False
 
         # Initialize the IOD entries and spec models dictionaries
-        self._iod_entries = {}  # Dict mapping table_id to IODEntry objects
-        self._iod_specmodels = {}  # Dict mapping table_id to loaded SpecModel instances
+        self._iod_entries: dict[str, IODEntry] = {}  # Dict mapping table_id to IODEntry objects
+        self._iod_specmodels: dict[str, SpecModel] = {}  # Dict mapping table_id to loaded SpecModel instances
 
     @property
     def iod_list(self) -> List[IODEntry]:
@@ -106,7 +107,7 @@ class Model:
         return self._version
 
     def load_iod_list(
-        self, force_download: bool = False, progress_observer: ServiceProgressObserver = None
+        self, force_download: bool = False, progress_observer: Optional[ServiceProgressObserver] = None
     ) -> List[IODEntry]:
         """Load list of IODs from the DICOM PS3.3 List of Tables.
 
@@ -170,7 +171,7 @@ class Model:
         return iod_entry_list
 
     def load_iod_model(
-        self, table_id: str, logger: logging.Logger, progress_observer: ServiceProgressObserver = None
+        self, table_id: str, logger: logging.Logger, progress_observer: Optional[ServiceProgressObserver] = None
     ) -> Any:
         """Load the IOD model for the given table_id using the IODSpecBuilder API.
 
@@ -219,8 +220,9 @@ class Model:
 
         # Create the modules specification factory
 
-        # Set unformatted to False for elem_description (column 3), others remain True
-        parser_kwargs = {"unformatted": {0: True, 1: True, 2: True, 3: False}}
+        # Set parser unformatted to False for elem_description (column 3), others remain True
+        parser_kwargs: dict[str, Any] = {"unformatted": {0: True, 1: True, 2: True, 3: False}}
+        # Set skip_columns to elem_type column if IOD is normalized (no Type column)
         if not composite_iod:
             parser_kwargs["skip_columns"] = [2]
         module_factory = SpecFactory(
@@ -275,22 +277,26 @@ class Model:
                 return None
         return node
 
-    def get_node_details(self, node_path: str) -> Optional[dict]:
-        """Return all attributes of an Anytree node given its full path in the model.
+    def get_node_public_attrs(self, table_id: str, relative_path: str) -> Optional[dict]:
+        """Return all public attributes of a node in the SpecModel tree given its table_id and relative path.
 
-        This method locates the node in the IOD tree using the provided node_path,
-        and returns its attributes as a dictionary. If the node is not found, returns None.
+        This method locates the node in the loaded SpecModel tree using the provided table_id and relative_path,
+        and returns its public attributes (those not starting with an underscore) as a dictionary.
+        If the node is not found, returns None.
 
         Args:
-            node_path (str): The full path to the node (e.g., "IOD List/Some IOD/Some Module/Some Attribute").
+            table_id (str): The table_id of the IOD (e.g., "table_A.49-1").
+            relative_path (str): The path from the SpecModel root, e.g., "Module/Attribute".
 
         Returns:
-            dict: The node's attributes including anytree metadata.
+            dict: The node's public attributes.
             The consumer (controller/view) should select which attributes to display.
 
         """
-        node = self.get_node_by_path(node_path)
-        return None if node is None else node.__dict__
+        node = self.get_specmodel_node(table_id, relative_path)
+        if node:
+            return {k: v for k, v in node.__dict__.items() if not k.startswith("_")}
+        return None
 
     def get_module_ref_link(self, ref_value: str) -> str:
         """Return formatted HTML anchor for the module reference, or escaped plain text if not available or unsafe."""
@@ -329,8 +335,8 @@ class Model:
         self,
         force_download: bool,
         cache_file_name: str,
-        temp_file_name: str = None,
-        progress_observer: ServiceProgressObserver = None,
+        temp_file_name: Optional[str] = None,
+        progress_observer: Optional[ServiceProgressObserver] = None,
     ) -> BeautifulSoup:
         """Download or load the IOD list HTML from cache, using a temp file if force_download is True.
 
@@ -453,7 +459,9 @@ class Model:
             description="model cache folder to versioned folder",
         )
 
-    def _move_folder_if_exists(self, src: str, dst: str, ensure_parent: str = None, description: str = "") -> None:
+    def _move_folder_if_exists(
+        self, src: str, dst: str, ensure_parent: Optional[str] = None, description: str = ""
+    ) -> None:
         """Move a folder from src to dst if it exists, creating parent if needed, and log the result.
 
         Args:

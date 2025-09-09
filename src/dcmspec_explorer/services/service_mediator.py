@@ -50,18 +50,26 @@ class BaseServiceMediator(QObject):
         self.model = model
         self.logger = logger
 
-        self._event_queue = None
-        self._worker = None
-        self._thread = None
-        self._poll_timer = None
+        self._event_queue: Optional[queue.Queue] = None
+        self._worker: Optional[Any] = None
+        self._thread: Optional[threading.Thread] = None
+        self._poll_timer: Optional[QTimer] = None
 
     def start_worker(self, worker_cls: type, **worker_kwargs: Any) -> Tuple[Any, threading.Thread]:
         """Start the given worker in a background thread and begin polling its event queue."""
         self._event_queue = queue.Queue()
-        self._worker = worker_cls(logger=self.logger, event_queue=self._event_queue, **worker_kwargs)
+        try:
+            self._worker = worker_cls(logger=self.logger, event_queue=self._event_queue, **worker_kwargs)
+        except Exception as exc:
+            self.logger.exception(f"Failed to instantiate worker: {worker_cls.__name__}")
+            raise RuntimeError(f"Worker could not be instantiated: {worker_cls.__name__}") from exc
+
+        if self._worker is None:
+            self.logger.error(f"Worker class {worker_cls.__name__} returned None on instantiation.")
+            raise RuntimeError(f"Worker could not be instantiated: {worker_cls.__name__}")
+
         self._thread = threading.Thread(target=self._worker.run, daemon=True)
         self._thread.start()
-
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self._poll_event_queue)
         self._poll_timer.start(50)
@@ -77,7 +85,8 @@ class BaseServiceMediator(QObject):
                 signal.emit(self, data)
                 if should_cleanup:
                     self.cleanup_worker_thread()
-                    self._poll_timer.stop()
+                    if self._poll_timer is not None:
+                        self._poll_timer.stop()
 
     def cleanup_worker_thread(self) -> None:
         """Clean up the worker and its thread after completion or error."""

@@ -6,6 +6,7 @@ from anytree import PreOrderIter, Node
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon
 
 from dcmspec_explorer.model.model import IODEntry, Model
+from dcmspec_explorer.services.favorites_manager import FavoritesManager
 from dcmspec_explorer.qt.qt_roles import TABLE_ID_ROLE, TABLE_URL_ROLE, NODE_PATH_ROLE, IS_FAVORITE_ROLE
 
 # Define mapping of column names to their indices
@@ -20,7 +21,7 @@ COLUMN_INDEX = {
 class IODTreeViewModelAdapter:
     """Adapt IOD data model to Qt treeview model."""
 
-    def __init__(self, favorites_manager: object = None, heart_icon: Optional[QIcon] = None):
+    def __init__(self, favorites_manager: Optional[FavoritesManager] = None, heart_icon: Optional[QIcon] = None):
         """Initialize the adapter with an optional favorites manager."""
         self.favorites_manager = favorites_manager
         self.heart_icon = heart_icon
@@ -161,7 +162,7 @@ class IODTreeViewModelAdapter:
         if not content:
             return
 
-        tree_items = {}  # Map from node to QStandardItem for building hierarchy
+        tree_items: dict[Node, QStandardItem] = {}  # Map from node to QStandardItem for building hierarchy
 
         for node in PreOrderIter(content):
             if node == content:
