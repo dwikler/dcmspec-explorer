@@ -165,7 +165,7 @@ files = [
 
 [[package]]
 name = "dcmspec"
-version = "0.1.0"
+version = "0.2.0"
 description = ""
 optional = false
 python-versions = ">=3.12,<4.0"
@@ -190,7 +190,7 @@ pdf = ["camelot-py (>=1.0.0,<2.0.0)", "opencv-python-headless (>=4.12.0.88,<5.0.
 type = "git"
 url = "https://github.com/dwikler/dcmspec.git"
 reference = "HEAD"
-resolved_reference = "d5be1621044559cbe328b0f6cb49c2af522af232"
+resolved_reference = "03690b3e70d452289f30ff62e78c189a55345c63"
 
 [[package]]
 name = "distlib"

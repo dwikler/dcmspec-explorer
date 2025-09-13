@@ -241,14 +241,42 @@ class Model:
         )
 
         # Build and store the model in memory
-        iod_model = builder.build_from_url(
-            url=url,
-            cache_file_name=cache_file_name,
-            json_file_name=model_file_name,
-            table_id=table_id,
-            force_download=False,
-            progress_observer=progress_observer,
-        )
+        try:
+            iod_model, _ = builder.build_from_url(
+                url=url,
+                cache_file_name=cache_file_name,
+                json_file_name=model_file_name,
+                table_id=table_id,
+                force_download=False,
+                progress_observer=progress_observer,
+            )
+        except ValueError as ve:
+            self.logger.error(
+                f"Error unpacking result from build_from_url for table_id '{table_id}', url '{url}': {ve}. "
+                "The returned value did not match the expected tuple shape (SpecModel, ...)."
+            )
+            raise RuntimeError("Failed to load the DICOM model. Please try again or contact support.") from ve
+
+        # Type and attribute checks to ensure the returned object is as expected.
+        if not isinstance(iod_model, SpecModel):
+            self.logger.error(
+                f"Unexpected return type for table_id '{table_id}', url '{url}': {type(iod_model)} (expected SpecModel)"
+            )
+            raise TypeError(
+                "The selected DICOM model could not be loaded. This may be due to a corrupted file or network issue."
+            )
+        if not hasattr(iod_model, "content"):
+            self.logger.error(
+                (
+                    f"Returned SpecModel is missing 'content' attribute for table_id '{table_id}', "
+                    f"url '{url}': {type(iod_model)}"
+                )
+            )
+            raise RuntimeError(
+                "The IOD was loaded, but its content could not be accessed. The content may be incomplete or corrupted."
+            )
+
+        # Store the loaded model in memory
         self._iod_specmodels[table_id] = iod_model
 
         return iod_model
