@@ -241,7 +241,7 @@ class Model:
         )
 
         # Build and store the model in memory
-        iod_model = builder.build_from_url(
+        iod_model, _ = builder.build_from_url(
             url=url,
             cache_file_name=cache_file_name,
             json_file_name=model_file_name,
@@ -249,6 +249,15 @@ class Model:
             force_download=False,
             progress_observer=progress_observer,
         )
+        # Type and attribute checks to ensure the returned object is as expected.
+        if not isinstance(iod_model, SpecModel):
+            self.logger.error(f"Unexpected return type: {type(iod_model)} (expected SpecModel)")
+            raise RuntimeError("build_from_url did not return a SpecModel instance as first tuple element")
+        if not hasattr(iod_model, "content"):
+            self.logger.error(f"Returned SpecModel is missing 'content' attribute: {type(iod_model)}")
+            raise RuntimeError("Returned SpecModel is missing 'content' attribute")
+
+        # Store the loaded model in memory
         self._iod_specmodels[table_id] = iod_model
 
         return iod_model
