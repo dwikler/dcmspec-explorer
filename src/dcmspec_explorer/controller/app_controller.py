@@ -387,7 +387,17 @@ class AppController(QObject):
         # Update the version label with the model's version
         if self.model.version:
             self.view.ui.versionLabel.setText(f"Version: {self.model.version}")
-        self.view.update_status_bar(message=f"Listed {len(iod_entry_list)} IODs.")
+        if self.model.new_version_available:
+            self.view.show_info(
+                "DICOM Standard List Updated",
+                "The list of IODs for the new DICOM standard version has been loaded.<br><br>"
+                "Please expand IODs to download the new version and load their details.",
+            )
+            self.view.update_status_bar(
+                message="IOD list updated for new DICOM version. Expand an IOD to download and view its details."
+            )
+        else:
+            self.view.update_status_bar(message=f"Listed {len(iod_entry_list)} IODs.")
 
     def _handle_iodlist_error(self, sender: object, message: str) -> None:
         self.logger.error(f"Error signal received from {sender}: {message}")

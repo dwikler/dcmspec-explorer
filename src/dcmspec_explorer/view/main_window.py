@@ -211,6 +211,10 @@ class MainWindow(QMainWindow):
         """Show an error message dialog."""
         QMessageBox.critical(self, "Error", message)
 
+    def show_info(self, title: str, message: str) -> None:
+        """Show an informational message dialog."""
+        QMessageBox.information(self, title, message)
+
     def show_url_link_warning_dialog(self, url_str: str) -> bool:
         """Show a warning dialog before opening an external link and open if confirmed."""
         url = QUrl(url_str)

@@ -153,7 +153,10 @@ class Model:
 
             # Step 6: Archive/move the old cache if needed
             if force_download and self._new_version_available:
+                self.logger.info(f"DICOM version changed to {version}, archiving old cache...")
                 self._archive_previous_version_cache()
+                # Clear in-memory IOD models so they are reloaded from the new standard
+                self._iod_specmodels.clear()
 
             # Step 7: If a temp file was used, move it to the canonical location after archiving/version handling
             if force_download and temp_file_path:
