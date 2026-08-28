@@ -554,6 +554,7 @@ class Model:
                         table_url = urljoin(base_url, href)
                     else:
                         table_id = "table_id_not_found"
+                        table_url = ""
                         self.logger.warning(f"Table ID not found in href: {href}")
 
                     # Extract the title (remove the table number prefix)
