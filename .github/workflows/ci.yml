@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: lint, type-check, and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Setup Poetry
+        uses: pronovic/setup-poetry@v3
+        with:
+          version: "2.1.1"
+          cache-venv: "true"
+          cache-poetry: "true"
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      # Runs the same checks as the local pre-commit hooks, so CI still catches lint/type
+      # issues even if a contributor commits with --no-verify.
+      - name: Run ruff check
+        run: poetry run ruff check --line-length=120 .
+
+      - name: Run ruff format check
+        run: poetry run ruff format --check --line-length=120 .
+
+      - name: Run mypy
+        run: poetry run mypy --ignore-missing-imports .
+
+      - name: Run pytest
+        run: poetry run pytest -v tests/unit tests/integration
