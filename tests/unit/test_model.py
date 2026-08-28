@@ -1,9 +1,12 @@
 """Unit tests for the pure parsing logic in dcmspec_explorer.model.model.Model."""
 
+import os
 from urllib.parse import urljoin
 
 import pytest
+from anytree import Node
 from bs4 import BeautifulSoup
+from dcmspec.spec_model import SpecModel
 
 from dcmspec_explorer.model.model import IODEntry, Model
 
@@ -188,3 +191,94 @@ class TestGetModuleRefLink:
         """Plain text with no <a> tag at all falls through to html.escape."""
         result = model.get_module_ref_link("<b>no anchor here</b>")
         assert result == "&lt;b&gt;no anchor here&lt;/b&gt;"
+
+
+class TestGetSpecmodelNode:
+    """Tests for Model.get_specmodel_node against a small in-memory anytree fixture."""
+
+    @pytest.fixture
+    def tree_specmodel(self, model):
+        """Register a small SpecModel tree (root -> ModuleA -> AttributeB) under table_id "t1"."""
+        content = Node("content")
+        module = Node("ModuleA", parent=content)
+        Node("AttributeB", parent=module)
+        specmodel = SpecModel(metadata=Node("metadata"), content=content)
+        model._iod_specmodels["t1"] = specmodel
+        return specmodel
+
+    def test_empty_relative_path_returns_root_node(self, model, tree_specmodel):
+        """An empty relative_path returns the specmodel's content root node."""
+        assert model.get_specmodel_node("t1", "") is tree_specmodel.content
+
+    def test_multi_segment_path_walks_nested_children(self, model, tree_specmodel):
+        """A multi-segment relative_path walks down matching child node names."""
+        node = model.get_specmodel_node("t1", "ModuleA/AttributeB")
+        assert node.name == "AttributeB"
+
+    def test_missing_table_id_returns_none(self, model, tree_specmodel):
+        """A table_id with no loaded specmodel returns None."""
+        assert model.get_specmodel_node("unknown_table_id", "ModuleA") is None
+
+    def test_missing_path_segment_returns_none(self, model, tree_specmodel):
+        """A path segment that doesn't match any child name returns None."""
+        assert model.get_specmodel_node("t1", "ModuleA/DoesNotExist") is None
+
+    def test_specmodel_missing_content_returns_none(self, model):
+        """A loaded specmodel with no content attribute returns None."""
+        model._iod_specmodels["t2"] = object()
+        assert model.get_specmodel_node("t2", "ModuleA") is None
+
+
+class TestGetNodePublicAttrs:
+    """Tests for Model.get_node_public_attrs."""
+
+    @pytest.fixture
+    def tree_specmodel(self, model):
+        """Register a small SpecModel tree with a node carrying a plain and an underscore-prefixed attribute.
+
+        "Attribute" here is a Python object attribute on the anytree Node, not a DICOM Attribute
+        (Data Element) -- get_node_public_attrs filters by leading underscore, unrelated to DICOM's
+        own public/private tag concept.
+        """
+        content = Node("content")
+        module = Node("ModuleA", parent=content)
+        module.usage = "M"
+        module._internal = "hidden"
+        specmodel = SpecModel(metadata=Node("metadata"), content=content)
+        model._iod_specmodels["t1"] = specmodel
+        return specmodel
+
+    def test_filters_out_underscore_prefixed_attrs(self, model, tree_specmodel):
+        """Attributes starting with an underscore (including anytree's own) are excluded."""
+        attrs = model.get_node_public_attrs("t1", "ModuleA")
+        assert attrs["name"] == "ModuleA"
+        assert attrs["usage"] == "M"
+        assert all(not k.startswith("_") for k in attrs)
+
+    def test_returns_none_when_node_not_found(self, model, tree_specmodel):
+        """No matching node (missing table_id or path) returns None."""
+        assert model.get_node_public_attrs("t1", "DoesNotExist") is None
+
+
+class TestCacheDirHelpers:
+    """Tests for the cache-directory path helper methods, all trivial os.path.join wrappers."""
+
+    def test_standard_cache_dir_joins_cache_dir_and_standard(self, model):
+        """_standard_cache_dir is cache_dir/standard."""
+        assert model._standard_cache_dir() == os.path.join(model.config.cache_dir, "standard")
+
+    def test_model_cache_dir_joins_cache_dir_and_model(self, model):
+        """_model_cache_dir is cache_dir/model."""
+        assert model._model_cache_dir() == os.path.join(model.config.cache_dir, "model")
+
+    def test_versioned_dir_joins_cache_dir_and_version(self, model):
+        """_versioned_dir is cache_dir/<version>."""
+        assert model._versioned_dir("2026c") == os.path.join(model.config.cache_dir, "2026c")
+
+    def test_versioned_standard_dir_joins_versioned_dir_and_standard(self, model):
+        """_versioned_standard_dir is cache_dir/<version>/standard."""
+        assert model._versioned_standard_dir("2026c") == os.path.join(model.config.cache_dir, "2026c", "standard")
+
+    def test_versioned_model_dir_joins_versioned_dir_and_model(self, model):
+        """_versioned_model_dir is cache_dir/<version>/model."""
+        assert model._versioned_model_dir("2026c") == os.path.join(model.config.cache_dir, "2026c", "model")
