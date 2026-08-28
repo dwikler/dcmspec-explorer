@@ -1,7 +1,18 @@
 """Shared pytest fixtures for the dcmspec_explorer test suite."""
 
+import logging
+
 import pytest
 from dcmspec.config import Config
+
+
+@pytest.fixture
+def fake_logger():
+    """Return a logger with a NullHandler so tests don't spam stdout."""
+    logger = logging.getLogger("dcmspec_explorer.test")
+    logger.handlers = [logging.NullHandler()]
+    logger.setLevel(logging.DEBUG)
+    return logger
 
 
 @pytest.fixture(autouse=True)
