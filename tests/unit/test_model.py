@@ -282,3 +282,118 @@ class TestCacheDirHelpers:
     def test_versioned_model_dir_joins_versioned_dir_and_model(self, model):
         """_versioned_model_dir is cache_dir/<version>/model."""
         assert model._versioned_model_dir("2026c") == os.path.join(model.config.cache_dir, "2026c", "model")
+
+
+class TestMoveFolderIfExists:
+    """Tests for Model._move_folder_if_exists."""
+
+    def test_creates_parent_dir_and_moves_when_source_exists(self, model, tmp_path):
+        """The source folder is moved to dst, creating ensure_parent's directory first."""
+        src = tmp_path / "src_dir"
+        src.mkdir()
+        (src / "file.txt").write_text("content")
+        parent = tmp_path / "nested"
+        dst = parent / "dst_dir"
+
+        model._move_folder_if_exists(str(src), str(dst), ensure_parent=str(parent))
+
+        assert not src.exists()
+        assert (dst / "file.txt").read_text() == "content"
+
+    def test_noop_when_source_missing(self, model, tmp_path):
+        """Nothing is moved or created when the source folder doesn't exist."""
+        src = tmp_path / "does_not_exist"
+        dst = tmp_path / "dst_dir"
+
+        model._move_folder_if_exists(str(src), str(dst))
+
+        assert not dst.exists()
+
+    def test_move_failure_logs_warning_without_propagating(self, model, tmp_path, monkeypatch, caplog):
+        """A shutil.move failure is caught, logged as a warning, and not raised."""
+        src = tmp_path / "src_dir"
+        src.mkdir()
+        dst = tmp_path / "dst_dir"
+
+        def _raise_os_error(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr("shutil.move", _raise_os_error)
+
+        with caplog.at_level("WARNING"):
+            model._move_folder_if_exists(str(src), str(dst))
+
+        assert "Failed to move" in caplog.text
+
+
+class TestTempFileHelpers:
+    """Tests for the temp-file helpers used by Model.load_iod_list's force_download path."""
+
+    def test_create_temp_iod_list_file_creates_html_file_under_standard_cache_dir(self, model):
+        """A unique .html temp file is created under _standard_cache_dir()."""
+        os.makedirs(model._standard_cache_dir(), exist_ok=True)
+
+        temp_file_name, temp_file_path = model._create_temp_iod_list_file()
+
+        assert os.path.exists(temp_file_path)
+        assert temp_file_path == os.path.join(model._standard_cache_dir(), temp_file_name)
+        assert temp_file_name.endswith(".html")
+
+    def test_move_temp_file_to_cache_root_moves_and_returns_new_path(self, model):
+        """The temp file is moved from cache/standard to the cache root, returning the new path."""
+        os.makedirs(model._standard_cache_dir(), exist_ok=True)
+        temp_file_name, temp_file_path = model._create_temp_iod_list_file()
+
+        new_path = model._move_temp_file_to_cache_root(temp_file_name)
+
+        assert new_path == os.path.join(model.config.cache_dir, temp_file_name)
+        assert os.path.exists(new_path)
+        assert not os.path.exists(temp_file_path)
+
+    def test_move_temp_file_to_cache_root_failure_returns_original_path_and_logs_warning(
+        self, model, monkeypatch, caplog
+    ):
+        """On a shutil.move failure, the original cache/standard path is returned and a warning is logged."""
+        os.makedirs(model._standard_cache_dir(), exist_ok=True)
+        temp_file_name, temp_file_path = model._create_temp_iod_list_file()
+
+        def _raise_os_error(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr("shutil.move", _raise_os_error)
+
+        with caplog.at_level("WARNING"):
+            result = model._move_temp_file_to_cache_root(temp_file_name)
+
+        assert result == temp_file_path
+        assert "Failed to move" in caplog.text
+
+    def test_move_temp_iod_list_to_cache_creates_dest_dir_if_missing_and_moves(self, model, tmp_path):
+        """The temp file is moved into cache/standard/<cache_file_name>, creating the dir if missing."""
+        temp_file_path = tmp_path / "downloaded.html"
+        temp_file_path.write_text("downloaded content")
+
+        model._move_temp_iod_list_to_cache(str(temp_file_path), "ps3.3.html")
+
+        dest = os.path.join(model._standard_cache_dir(), "ps3.3.html")
+        assert os.path.exists(dest)
+        with open(dest, encoding="utf-8") as f:
+            assert f.read() == "downloaded content"
+        assert not temp_file_path.exists()
+
+    def test_move_temp_iod_list_to_cache_failure_logs_warning_without_propagating(
+        self, model, tmp_path, monkeypatch, caplog
+    ):
+        """A shutil.move failure is caught, logged as a warning, and not raised."""
+        temp_file_path = tmp_path / "downloaded.html"
+        temp_file_path.write_text("downloaded content")
+
+        def _raise_os_error(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr("shutil.move", _raise_os_error)
+
+        with caplog.at_level("WARNING"):
+            model._move_temp_iod_list_to_cache(str(temp_file_path), "ps3.3.html")
+
+        assert "Failed to move" in caplog.text
