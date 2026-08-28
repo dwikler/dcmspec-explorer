@@ -53,3 +53,4 @@ ignore = ["D203", "D213"]
 python_version = "3.12"
 ignore_missing_imports = true
 disallow_untyped_defs = false
+exclude = ["^scratch/"]

@@ -1,8 +1,10 @@
 """Subclass of QStyledItemDelegate to paint a favorite icon in the favorites column."""
 
+from typing import Optional, Union
+
 from PySide6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem
 from PySide6.QtGui import QPainter, QIcon
-from PySide6.QtCore import Qt, QModelIndex, QRect
+from PySide6.QtCore import Qt, QModelIndex, QPersistentModelIndex, QRect
 
 from dcmspec_explorer.qt.qt_roles import IS_FAVORITE_ROLE
 
@@ -10,12 +12,12 @@ from dcmspec_explorer.qt.qt_roles import IS_FAVORITE_ROLE
 class FavoriteIconDelegate(QStyledItemDelegate):
     """Custom delegate to paint a favorite icon in the favorites column."""
 
-    def __init__(self, heart_icon: QIcon, parent=None):
+    def __init__(self, heart_icon: Optional[QIcon], parent=None):
         """Initialize the delegate with a heart icon."""
         super().__init__(parent)
         self.heart_icon = heart_icon
 
-    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: Union[QModelIndex, QPersistentModelIndex]):
         """Override to draw the default item."""
         super().paint(painter, option, index)
 

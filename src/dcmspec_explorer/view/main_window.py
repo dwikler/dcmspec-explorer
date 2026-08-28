@@ -98,7 +98,7 @@ class MainWindow(QMainWindow):
                 return QFont(fam) if size is None else QFont(fam, size)
         # Fallback: use system default monospace
         font = QFont()
-        font.setStyleHint(QFont.Monospace)
+        font.setStyleHint(QFont.StyleHint.Monospace)
         if size is not None:
             font.setPointSize(size)
         return font
@@ -204,7 +204,9 @@ class MainWindow(QMainWindow):
 
         """
         header = self.ui.iodTreeView.header()
-        header.setSortIndicator(sort_column, Qt.DescendingOrder if sort_reverse else Qt.AscendingOrder)
+        header.setSortIndicator(
+            sort_column, Qt.SortOrder.DescendingOrder if sort_reverse else Qt.SortOrder.AscendingOrder
+        )
         header.setSortIndicatorShown(True)
 
     def show_error(self, message: str) -> None:

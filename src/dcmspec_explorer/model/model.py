@@ -336,7 +336,8 @@ class Model:
         soup = BeautifulSoup(ref_value, "xml")
         anchor = soup.find("a", class_="xref")
         if anchor and anchor.has_attr("href"):
-            href = anchor["href"].strip()
+            href_attr = anchor["href"]
+            href = (href_attr if isinstance(href_attr, str) else " ".join(href_attr)).strip()
             anchor_text = anchor.get_text(strip=True)
             # Only allow fragment identifiers (starting with #)
             if href.startswith("#"):

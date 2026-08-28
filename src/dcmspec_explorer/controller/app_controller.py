@@ -1,13 +1,13 @@
 """Controller class for the DCMspec Explorer application."""
 
 import threading
-from typing import Any, Optional
+from typing import Any, Optional, cast
 import warnings
 import contextlib
 
 
 from PySide6.QtCore import Qt, QTimer, QObject, QModelIndex, QUrl
-from PySide6.QtGui import QStandardItem
+from PySide6.QtGui import QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import QMenu
 
 from dcmspec.progress import Progress
@@ -142,7 +142,7 @@ class AppController(QObject):
 
     def _on_treeview_item_clicked(self, index: QModelIndex) -> None:
         """Handle selection of a treeview item."""
-        model = index.model()
+        model = cast(Optional[QStandardItemModel], index.model())
         if not model:
             return
 
@@ -189,7 +189,7 @@ class AppController(QObject):
 
     def _on_treeview_right_click(self, index: QModelIndex, global_pos):
         """Show context menu for favorites management on top-level items."""
-        model = index.model()
+        model = cast(QStandardItemModel, index.model())
         item = model.itemFromIndex(index.siblingAtColumn(0))
         table_id = item.data(TABLE_ID_ROLE)
 
@@ -259,7 +259,7 @@ class AppController(QObject):
         This prevents duplicate slot calls.
 
         Note:
-            By specifying Qt.QueuedConnection, we ensure that if a signal is emitted from any thread,
+            By specifying Qt.ConnectionType.QueuedConnection, we ensure that if a signal is emitted from any thread,
             the connected slot (UI update method) will be executed in the thread that owns the receiver object.
             In this case, both the ServiceMediator and AppController live in the main thread, so UI updates
             are performed in the main thread, ensuring thread safety for all Qt UI operations.
@@ -268,7 +268,7 @@ class AppController(QObject):
         signals = [pair[0] for pair in signal_slot_pairs]
         self._safe_disconnect(*signals)
         for signal, slot in signal_slot_pairs:
-            signal.connect(slot, Qt.QueuedConnection)
+            signal.connect(slot, Qt.ConnectionType.QueuedConnection)
 
     def _connect_iodlist_signals(self):
         """(Re)connect IOD list loader signals to their handlers, safely disconnecting first."""
@@ -315,7 +315,9 @@ class AppController(QObject):
         )
 
         # Connect signals to handlers for progress, loaded, and error
-        self.iod_model_service.iodmodel_progress_signal.connect(self._handle_iodmodel_progress, Qt.QueuedConnection)
+        self.iod_model_service.iodmodel_progress_signal.connect(
+            self._handle_iodmodel_progress, Qt.ConnectionType.QueuedConnection
+        )
         # table_id is captured at lambda creation time as it may be out-of-scope by the time the lambda is executed
         self.iod_model_service.iodmodel_loaded_signal.connect(
             lambda sender, iod_model, table_id=table_id: self._handle_iodmodel_loaded(
@@ -323,9 +325,11 @@ class AppController(QObject):
                 iod_model,
                 table_id,  # pass selected item table_id to recover item selection in rebuilt treeview
             ),
-            Qt.QueuedConnection,
+            Qt.ConnectionType.QueuedConnection,
         )
-        self.iod_model_service.iodmodel_error_signal.connect(self._handle_iodmodel_error, Qt.QueuedConnection)
+        self.iod_model_service.iodmodel_error_signal.connect(
+            self._handle_iodmodel_error, Qt.ConnectionType.QueuedConnection
+        )
 
         # Set expand property for the selected iod item in the view (will be effective when item will be populated)
         self.view.ui.iodTreeView.expand(index)
