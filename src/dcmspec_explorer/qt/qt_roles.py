@@ -14,7 +14,7 @@ Add new roles here as needed, using unique values to avoid conflicts.
 
 from PySide6.QtCore import Qt
 
-TABLE_ID_ROLE = Qt.UserRole
-TABLE_URL_ROLE = Qt.UserRole + 1
-NODE_PATH_ROLE = Qt.UserRole + 2
-IS_FAVORITE_ROLE = Qt.UserRole + 3
+TABLE_ID_ROLE = Qt.ItemDataRole.UserRole.value
+TABLE_URL_ROLE = Qt.ItemDataRole.UserRole.value + 1
+NODE_PATH_ROLE = Qt.ItemDataRole.UserRole.value + 2
+IS_FAVORITE_ROLE = Qt.ItemDataRole.UserRole.value + 3

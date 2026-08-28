@@ -8,18 +8,27 @@ repos:
         types: [python]
         files: \.ui$
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.12.8 # Use the latest stable version
-    hooks:
-      # Run the linter.
+      # Run the linter and formatter using poetry's own venv (see pyproject.toml's
+      # ruff/mypy dev dependencies) instead of pre-commit's isolated hook envs, so the
+      # versions used here always match `poetry run ruff`/`poetry run mypy` exactly and
+      # mypy has real access to the project's actual installed type stubs (PySide6, bs4,
+      # dcmspec) rather than running blind. --force-exclude makes ruff still honor
+      # pyproject.toml's [tool.ruff] exclude (generated *_ui.py files) even though
+      # pre-commit passes explicit filenames, which ruff otherwise treats as
+      # forced-inclusion regardless of exclude.
       - id: ruff-check
-        args: [--fix, --line-length=120]
-        # Run the formatter.
+        name: ruff check
+        entry: poetry run ruff check --fix --force-exclude --line-length=120
+        language: system
+        types: [python]
       - id: ruff-format
-        args: [--line-length=120]
-
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.8.0
-    hooks:
+        name: ruff format
+        entry: poetry run ruff format --force-exclude --line-length=120
+        language: system
+        types: [python]
       - id: mypy
-        args: [--ignore-missing-imports]
+        name: mypy
+        entry: poetry run mypy --ignore-missing-imports .
+        language: system
+        types: [python]
+        pass_filenames: false

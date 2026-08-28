@@ -1,7 +1,7 @@
 """Mediator between service layer and controller of DCM Spec Explorer."""
 
 import queue
-from typing import Any, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 import threading
 
 from PySide6.QtCore import QObject, Signal, QTimer
@@ -54,6 +54,7 @@ class BaseServiceMediator(QObject):
         self._worker: Optional[Any] = None
         self._thread: Optional[threading.Thread] = None
         self._poll_timer: Optional[QTimer] = None
+        self._signal_map: Dict[str, Tuple[Any, bool]] = {}
 
     def start_worker(self, worker_cls: type, **worker_kwargs: Any) -> Tuple[Any, threading.Thread]:
         """Start the given worker in a background thread and begin polling its event queue."""
