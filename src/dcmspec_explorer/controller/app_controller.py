@@ -1,5 +1,6 @@
 """Controller class for the DCMspec Explorer application."""
 
+import re
 import threading
 from typing import Any, Optional, cast
 import warnings
@@ -18,7 +19,11 @@ from dcmspec_explorer.model.model import DICOM_TYPE_MAP, DICOM_USAGE_MAP
 from dcmspec_explorer.model.model import Model
 from dcmspec_explorer.model.model import IODEntry
 
-from dcmspec_explorer.services.service_mediator import IODListLoaderServiceMediator, IODModelLoaderServiceMediator
+from dcmspec_explorer.services.service_mediator import (
+    IODListLoaderServiceMediator,
+    IODModelLoaderServiceMediator,
+    IODExportServiceMediator,
+)
 from dcmspec_explorer.services.favorites_manager import FavoritesManager
 
 from dcmspec_explorer.view.load_iod_dialog import LoadIODDialog
@@ -91,6 +96,7 @@ class AppController(QObject):
         # Initialize the service mediators
         self.service = IODListLoaderServiceMediator(self.model, self.logger, parent=self)
         self.iod_model_service = IODModelLoaderServiceMediator(self.model, self.logger, parent=self)
+        self.export_service = IODExportServiceMediator(self.model, self.logger, parent=self)
 
         # Use QTimer to ensure the treeview is only initialized after the window is shown
         QTimer.singleShot(0, self.initialize_treeview)
@@ -188,7 +194,7 @@ class AppController(QObject):
         return self.model.get_node_public_attrs(table_id, relative_path)
 
     def _on_treeview_right_click(self, index: QModelIndex, global_pos):
-        """Show context menu for favorites management on top-level items."""
+        """Show context menu for favorites management and export on top-level items."""
         model = cast(QStandardItemModel, index.model())
         item = model.itemFromIndex(index.siblingAtColumn(0))
         table_id = item.data(TABLE_ID_ROLE)
@@ -206,7 +212,63 @@ class AppController(QObject):
             action = menu.addAction("Add to favorites")
         # Connect to the signal triggered if the user selects the action
         action.triggered.connect(lambda: self._toggle_favorite(table_id))
+
+        # Add an export submenu, enabled only once this IOD's specmodel has been loaded
+        iod_name = item.text()
+        export_menu = menu.addMenu("Export")
+        csv_action = export_menu.addAction("CSV...")
+        xlsx_action = export_menu.addAction("Excel...")
+        is_loaded = table_id in self.model.iod_specmodels
+        export_menu.setEnabled(is_loaded)
+        if not is_loaded:
+            export_menu.menuAction().setToolTip("Select this IOD first to load it")
+        csv_action.triggered.connect(lambda: self._export_iod_model(table_id, iod_name, "csv"))
+        xlsx_action.triggered.connect(lambda: self._export_iod_model(table_id, iod_name, "xlsx"))
+
         menu.exec(global_pos)
+
+    @staticmethod
+    def _normalize_export_filename(name: str) -> str:
+        """Replace filesystem-unsafe characters and spaces in a proposed export filename with underscores."""
+        name = re.sub(r'[\\/:*?"<>|]', "_", name.strip())
+        return re.sub(r"\s+", "_", name) or "export"
+
+    def _export_iod_model(self, table_id: str, iod_name: str, fmt: str) -> None:
+        """Prompt for a destination file and export the given IOD's spec model in the given format."""
+        if fmt == "xlsx":
+            extension, file_filter = "xlsx", "Excel files (*.xlsx)"
+        else:
+            extension, file_filter = "csv", "CSV files (*.csv)"
+        default_name = f"{self._normalize_export_filename(iod_name)}.{extension}"
+
+        path = self.view.prompt_save_file("Export IOD", default_name, file_filter)
+        if path is None:
+            return
+
+        self.view.update_status_bar(message="Exporting...")
+        self.export_service.start_export_worker(
+            iod_model=self.model.iod_specmodels[table_id], fmt=fmt, output_path=path
+        )
+        self._connect_export_signals()
+
+    def _connect_export_signals(self):
+        """(Re)connect IOD export signals to their handlers, safely disconnecting first."""
+        self._connect_signals(
+            [
+                (self.export_service.iodexport_loaded_signal, self._handle_export_loaded),
+                (self.export_service.iodexport_error_signal, self._handle_export_error),
+            ]
+        )
+
+    def _handle_export_loaded(self, sender: object, output_path: str) -> None:
+        """Update the status bar once an export finishes successfully."""
+        self.view.update_status_bar(message=f"Exported to {output_path}")
+
+    def _handle_export_error(self, sender: object, message: str) -> None:
+        """Log the error and show it to the user when an export fails."""
+        self.logger.error(f"Error signal received from {sender}: {message}")
+        self.view.show_error(message)
+        self.view.update_status_bar(message="Error exporting IOD.")
 
     def _on_reload_clicked(self):
         """Handle Reload button click: reload IOD list from the web."""

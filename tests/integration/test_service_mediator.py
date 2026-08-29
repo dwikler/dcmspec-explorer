@@ -6,11 +6,18 @@ loop, with a FakeModel whose load methods return or raise immediately so the
 background thread finishes fast and the tests stay deterministic and non-flaky.
 """
 
+import pathlib
+
+from anytree import Node
+from openpyxl import load_workbook
+
 from dcmspec.progress import Progress
+from dcmspec.spec_model import SpecModel
 
 from dcmspec_explorer.services.service_mediator import (
     IODListLoaderServiceMediator,
     IODModelLoaderServiceMediator,
+    IODExportServiceMediator,
 )
 
 
@@ -162,3 +169,78 @@ class TestOverlappingWorkerStartsHazard:
 
         mediator.cleanup_worker_thread()
         mediator.cleanup_worker_thread()
+
+
+class TestIODExportServiceMediatorHappyPath:
+    """Tests for IODExportServiceMediator's signal emission and cleanup on real worker events.
+
+    Unlike the loader mediators above, these drive the real IODExportWorker against a real
+    (minimal) SpecModel and the real dcmspec IODSpecPrinter, so the assertions cover the actual
+    file written to disk, not just the emitted signal payload.
+    """
+
+    @staticmethod
+    def _make_iod_model():
+        """Return a minimal real SpecModel with one module and one attribute, for real IODSpecPrinter export."""
+        metadata = Node("metadata")
+        metadata.header = ["Attr1", "Attr2"]
+        metadata.column_to_attr = {0: "attr1", 1: "attr2"}
+        content = Node("content")
+        module_node = Node("module1", parent=content)
+        module_node.module = "Patient"
+        module_node.usage = "M"
+        attr_node = Node("attr", parent=module_node)
+        attr_node.attr1 = "Value1"
+        attr_node.attr2 = "Value2"
+        model = SpecModel(metadata=metadata, content=content)
+        model._is_include = lambda node: False
+        model._is_title = lambda node: False
+        return model
+
+    def test_loaded_event_writes_real_csv_file_and_cleans_up(self, qtbot, fake_logger, tmp_path):
+        """A real csv export via IODSpecPrinter writes the file and emits iodexport_loaded_signal."""
+        output_path = str(tmp_path / "export.csv")
+        mediator = IODExportServiceMediator(model=None, logger=fake_logger)
+
+        with qtbot.waitSignal(mediator.iodexport_loaded_signal, timeout=1000) as blocker:
+            mediator.start_export_worker(iod_model=self._make_iod_model(), fmt="csv", output_path=output_path)
+
+        emitted_mediator, emitted_path = blocker.args
+        assert emitted_mediator is mediator
+        assert emitted_path == output_path
+        content = pathlib.Path(output_path).read_text(encoding="utf-8")
+        assert "Value1" in content
+        assert "Value2" in content
+        assert not hasattr(mediator, "_worker")
+        assert not hasattr(mediator, "_thread")
+        assert not mediator._poll_timer.isActive()
+
+    def test_loaded_event_writes_real_xlsx_file(self, qtbot, fake_logger, tmp_path):
+        """A real xlsx export via IODSpecPrinter writes a readable workbook and emits the loaded signal."""
+        output_path = str(tmp_path / "export.xlsx")
+        mediator = IODExportServiceMediator(model=None, logger=fake_logger)
+
+        with qtbot.waitSignal(mediator.iodexport_loaded_signal, timeout=1000) as blocker:
+            mediator.start_export_worker(iod_model=self._make_iod_model(), fmt="xlsx", output_path=output_path)
+
+        _, emitted_path = blocker.args
+        assert emitted_path == output_path
+        workbook = load_workbook(output_path)
+        sheet = workbook[workbook.sheetnames[0]]
+        values = [cell.value for row in sheet.iter_rows() for cell in row]
+        assert "Value1" in values
+
+    def test_error_event_emits_error_signal_and_cleans_up(self, qtbot, fake_logger, tmp_path):
+        """An unsupported format emits iodexport_error_signal with the failure message."""
+        mediator = IODExportServiceMediator(model=None, logger=fake_logger)
+
+        with qtbot.waitSignal(mediator.iodexport_error_signal, timeout=1000) as blocker:
+            mediator.start_export_worker(
+                iod_model=self._make_iod_model(), fmt="pdf", output_path=str(tmp_path / "export.pdf")
+            )
+
+        _, message = blocker.args
+        assert message == "Unsupported export format: pdf"
+        assert not hasattr(mediator, "_worker")
+        assert not hasattr(mediator, "_thread")
+        assert not mediator._poll_timer.isActive()

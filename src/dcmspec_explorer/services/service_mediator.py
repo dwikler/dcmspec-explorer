@@ -10,6 +10,7 @@ from dcmspec.progress import Progress
 
 from dcmspec_explorer.services.iod_loading_service import IODListLoaderWorker
 from dcmspec_explorer.services.iod_loading_service import IODModelLoaderWorker
+from dcmspec_explorer.services.iod_export_service import IODExportWorker
 
 
 class BaseServiceMediator(QObject):
@@ -143,3 +144,25 @@ class IODModelLoaderServiceMediator(BaseServiceMediator):
     def start_iodmodel_worker(self, table_id: str) -> Tuple[IODModelLoaderWorker, threading.Thread]:
         """Start the IOD model loader worker in a background thread."""
         return self.start_worker(IODModelLoaderWorker, model=self.model, table_id=table_id)
+
+
+class IODExportServiceMediator(BaseServiceMediator):
+    """Mediator for IODExportWorker, bridges service worker and Qt signals."""
+
+    # Define Qt Signals with data/payload types
+    iodexport_loaded_signal = Signal(object, object)
+    iodexport_error_signal = Signal(object, str)
+
+    def __init__(self, model: Any, logger: Any, parent: Optional[QObject] = None) -> None:
+        """Initialize the IODExportServiceMediator."""
+        super().__init__(model, logger, parent)
+        self._signal_map = {
+            "loaded": (self.iodexport_loaded_signal, True),
+            "error": (self.iodexport_error_signal, True),
+        }
+
+    def start_export_worker(
+        self, iod_model: Any, fmt: str, output_path: str
+    ) -> Tuple[IODExportWorker, threading.Thread]:
+        """Start the IOD export worker in a background thread."""
+        return self.start_worker(IODExportWorker, iod_model=iod_model, fmt=fmt, output_path=output_path)
