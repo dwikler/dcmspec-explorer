@@ -3,6 +3,7 @@
 import queue
 
 import pytest
+from anytree import Node
 
 from dcmspec_explorer.services.iod_export_service import IODExportWorker
 
@@ -13,6 +14,30 @@ def _chained_runtime_error():
         raise RuntimeError("wrapped") from ValueError("inner")
     except RuntimeError as error:
         return error
+
+
+class FakeIodModel:
+    """Fake loaded IOD spec model exposing only the .content attribute the worker needs."""
+
+    def __init__(self, content):
+        """Initialize with the given anytree content root."""
+        self.content = content
+
+
+def _make_iod_model(elem_description="<p>Patient's full name.</p>"):
+    """Build a minimal fake IOD model: one module with one attribute carrying an HTML description."""
+    content = Node("content")
+    module = Node("PatientModule", parent=content)
+    module.module = "Patient"
+    attr_node = Node("attr", parent=module)
+    attr_node.elem_name = "Patient's Name"
+    attr_node.elem_description = elem_description
+    return FakeIodModel(content)
+
+
+def _find_attr_node(content):
+    """Return the single attribute node (grandchild of content) in a model built by _make_iod_model."""
+    return content.children[0].children[0]
 
 
 class FakePrinter:
@@ -66,8 +91,9 @@ class TestIODExportWorker:
         """A "csv" export constructs the printer with the right args and calls print_csv."""
         _patch_printer(monkeypatch)
         event_queue = queue.Queue()
+        iod_model = _make_iod_model()
         worker = IODExportWorker(
-            iod_model="some_spec_model",
+            iod_model=iod_model,
             fmt="csv",
             output_path="/tmp/out.csv",
             logger=fake_logger,
@@ -78,7 +104,6 @@ class TestIODExportWorker:
 
         assert event_queue.get_nowait() == ("loaded", "/tmp/out.csv")
         printer = FakePrinter.instances[0]
-        assert printer.model == "some_spec_model"
         assert printer.logger is fake_logger
         assert printer.output == "/tmp/out.csv"
         assert printer.print_csv_calls == 1
@@ -89,7 +114,7 @@ class TestIODExportWorker:
         _patch_printer(monkeypatch)
         event_queue = queue.Queue()
         worker = IODExportWorker(
-            iod_model="some_spec_model",
+            iod_model=_make_iod_model(),
             fmt="xlsx",
             output_path="/tmp/out.xlsx",
             logger=fake_logger,
@@ -108,7 +133,7 @@ class TestIODExportWorker:
         _patch_printer(monkeypatch)
         event_queue = queue.Queue()
         worker = IODExportWorker(
-            iod_model="some_spec_model",
+            iod_model=_make_iod_model(),
             fmt="pdf",
             output_path="/tmp/out.pdf",
             logger=fake_logger,
@@ -126,7 +151,7 @@ class TestIODExportWorker:
         _patch_printer(monkeypatch, error=RuntimeError("disk full"))
         event_queue = queue.Queue()
         worker = IODExportWorker(
-            iod_model="some_spec_model",
+            iod_model=_make_iod_model(),
             fmt="csv",
             output_path="/tmp/out.csv",
             logger=fake_logger,
@@ -144,7 +169,7 @@ class TestIODExportWorker:
         _patch_printer(monkeypatch, error=_chained_runtime_error())
         event_queue = queue.Queue()
         worker = IODExportWorker(
-            iod_model="some_spec_model",
+            iod_model=_make_iod_model(),
             fmt="csv",
             output_path="/tmp/out.csv",
             logger=fake_logger,
@@ -157,3 +182,68 @@ class TestIODExportWorker:
         assert caplog.records[-1].levelname == "ERROR"
         assert "ValueError" in caplog.text
         assert "inner" in caplog.text
+
+
+class TestToPlainTextModel:
+    """Tests for IODExportWorker._to_plain_text_model."""
+
+    def test_converts_html_description_to_plain_text(self):
+        """An HTML elem_description is converted to plain text on the returned copy."""
+        iod_model = _make_iod_model(elem_description="<p>Patient's <b>full</b> name.</p>")
+
+        export_model = IODExportWorker._to_plain_text_model(iod_model)
+
+        assert _find_attr_node(export_model.content).elem_description == "Patient's full name."
+
+    def test_does_not_mutate_the_original_model(self):
+        """The original model's HTML description is left untouched."""
+        original_html = "<p>Patient's <b>full</b> name.</p>"
+        iod_model = _make_iod_model(elem_description=original_html)
+
+        IODExportWorker._to_plain_text_model(iod_model)
+
+        assert _find_attr_node(iod_model.content).elem_description == original_html
+
+    def test_leaves_other_attributes_untouched(self):
+        """Attributes other than the known HTML-flagged ones pass through unchanged."""
+        iod_model = _make_iod_model()
+
+        export_model = IODExportWorker._to_plain_text_model(iod_model)
+
+        assert _find_attr_node(export_model.content).elem_name == "Patient's Name"
+
+    def test_missing_html_attr_does_not_raise(self):
+        """A node without any of the known HTML-flagged attributes is left alone without error."""
+        content = Node("content")
+        module = Node("PatientModule", parent=content)
+        module.module = "Patient"
+        iod_model = FakeIodModel(content)
+
+        export_model = IODExportWorker._to_plain_text_model(iod_model)  # must not raise
+
+        assert export_model.content.children[0].module == "Patient"
+
+
+class TestHtmlToText:
+    """Tests for IODExportWorker._html_to_text."""
+
+    def test_strips_tags_and_extracts_readable_text(self):
+        """Anchors, notes, and other markup collapse into their plain-text content."""
+        html = '<p>\n<a id="para_427a23ce" shape="rect"/>Patient\'s full name.</p>'
+        assert IODExportWorker._html_to_text(html) == "Patient's full name."
+
+    def test_note_div_content_is_preserved_as_text(self):
+        """A nested <div class="note"> block's text is kept, not dropped."""
+        html = (
+            "<p>Primary identifier for the Patient.</p>"
+            '<div class="note"><h3 class="title">Note</h3>'
+            '<p>See <a href="#sect">Section C.7.1.4.1.1</a>.</p></div>'
+        )
+        text = IODExportWorker._html_to_text(html)
+        assert "Primary identifier for the Patient." in text
+        assert "Note" in text
+        assert "See Section C.7.1.4.1.1" in text
+
+    def test_no_markup_is_returned_as_is(self):
+        """Plain text with no HTML markup passes through unchanged (aside from stripping)."""
+        assert IODExportWorker._html_to_text("Just plain text.") == "Just plain text."

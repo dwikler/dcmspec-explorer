@@ -1,11 +1,20 @@
 """IOD Export Service for DCMspec Explorer."""
 
+import copy
 import logging
 import queue
 import threading
 from typing import Any
 
+import html2text
+from anytree import PreOrderIter
+
 from dcmspec.iod_spec_printer import IODSpecPrinter
+
+# Node attributes dcmspec-explorer's Model deliberately parses as raw HTML (see model.py's
+# `unformatted=False` settings) so they can be rendered richly in the details pane. Exported files
+# need plain text instead, so IODExportWorker converts these on an export-only copy of the model.
+HTML_NODE_ATTRS = ("elem_description",)
 
 
 class IODExportWorker:
@@ -34,7 +43,8 @@ class IODExportWorker:
         """Run the worker to export the IOD model and send the outcome to the event queue."""
         self.logger.debug(f"IODExportWorker created in thread: {threading.current_thread().name}")
         try:
-            printer = IODSpecPrinter(self.iod_model, logger=self.logger, output=self.output_path)
+            export_model = self._to_plain_text_model(self.iod_model)
+            printer = IODSpecPrinter(export_model, logger=self.logger, output=self.output_path)
             if self.fmt == "csv":
                 printer.print_csv()
             elif self.fmt == "xlsx":
@@ -45,3 +55,24 @@ class IODExportWorker:
         except Exception as e:
             self.logger.exception(f"Failed to export IOD model to {self.output_path}")
             self.event_queue.put(("error", str(e)))
+
+    @staticmethod
+    def _to_plain_text_model(iod_model: Any) -> Any:
+        """Return a deep copy of iod_model with HTML-flagged node attributes converted to plain text."""
+        export_model = copy.deepcopy(iod_model)
+        for node in PreOrderIter(export_model.content):
+            for attr in HTML_NODE_ATTRS:
+                value = getattr(node, attr, None)
+                if value:
+                    setattr(node, attr, IODExportWorker._html_to_text(value))
+        return export_model
+
+    @staticmethod
+    def _html_to_text(html: str) -> str:
+        """Convert an HTML fragment to plain text, matching dcmspec's own html2text configuration."""
+        converter = html2text.HTML2Text()
+        converter.ignore_links = True
+        converter.ignore_images = True
+        converter.ignore_emphasis = True
+        converter.body_width = 0
+        return converter.handle(html).strip()
