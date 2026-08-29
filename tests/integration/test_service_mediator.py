@@ -154,6 +154,7 @@ class TestOverlappingWorkerStartsHazard:
 
         assert mediator._poll_timer is not first_timer
         assert first_timer.isActive()
+        first_timer.stop()  # avoid leaking a live repeating timer into later tests in this session
 
     def test_cleanup_worker_thread_swallows_error_on_double_cleanup(self, qtbot, fake_logger):
         """Calling cleanup_worker_thread twice in a row does not raise, thanks to its broad except Exception."""

@@ -22,9 +22,13 @@ poetry run pre-commit run --all-files   # run all pre-commit hooks manually
 poetry run ruff check --fix --line-length=120 .   # lint
 poetry run ruff format --line-length=120 .        # format
 poetry run mypy --ignore-missing-imports .        # type check
+poetry run pytest -v tests/unit tests/integration # run tests
 ```
 
-There is no test suite yet (`tests/` only contains `__init__.py`); don't invent test commands.
+Tests live under `tests/unit/` (isolated units against hand-written `Fake*` collaborators, no
+real I/O) and `tests/integration/` (multiple real collaborators together — real threads, real Qt
+signals via `pytest-qt`'s `qtbot`, real filesystem). On headless Linux (including CI), set
+`QT_QPA_PLATFORM=offscreen` before running tests that construct real Qt widgets.
 
 ## Editing Qt Designer `.ui` files
 

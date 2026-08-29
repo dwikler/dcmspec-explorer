@@ -217,14 +217,14 @@ class TestBuildTreeviewModelTopLevelRows:
         assert favorite_item.data(IS_FAVORITE_ROLE) is False
 
     def test_no_favorites_manager_treats_all_entries_as_non_favorite(self):
-        """With favorites_manager=None, the favorite role is falsy for every entry."""
+        """With favorites_manager=None, the favorite role is False (not just falsy) for every entry."""
         entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
         adapter = IODTreeViewModelAdapter(favorites_manager=None)
 
         model = adapter.populate_treeview_model_top_level([entry])
 
         favorite_item = model.item(0, COLUMN_INDEX["favorite"])
-        assert not favorite_item.data(IS_FAVORITE_ROLE)
+        assert favorite_item.data(IS_FAVORITE_ROLE) is False
 
     def test_table_id_and_table_url_stored_on_name_item(self):
         """TABLE_ID_ROLE and TABLE_URL_ROLE are set on the name-column item, not other columns."""
