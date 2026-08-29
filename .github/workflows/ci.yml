@@ -45,4 +45,6 @@ jobs:
         run: poetry run mypy --ignore-missing-imports .
 
       - name: Run pytest
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: poetry run pytest -v tests/unit tests/integration

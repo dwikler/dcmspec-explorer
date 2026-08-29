@@ -6,6 +6,14 @@ from dcmspec_explorer.services.iod_loading_service import IODListLoaderWorker, I
 from dcmspec_explorer.services.progress_observer import ServiceProgressObserver
 
 
+def _chained_runtime_error():
+    """Return a RuntimeError chained onto a ValueError, as if raised via `raise ... from ...`."""
+    try:
+        raise RuntimeError("wrapped") from ValueError("inner")
+    except RuntimeError as error:
+        return error
+
+
 class FakeModel:
     """Fake model recording calls and returning or raising a canned result."""
 
@@ -62,6 +70,19 @@ class TestIODListLoaderWorker:
 
         assert event_queue.get_nowait() == ("error", "boom")
 
+    def test_chained_exception_only_queues_the_outer_message_but_logs_the_full_chain(self, fake_logger, caplog):
+        """A chained exception's cause/traceback are dropped from the queued message, but logged in full."""
+        event_queue = queue.Queue()
+        model = FakeModel(error=_chained_runtime_error())
+        worker = IODListLoaderWorker(model=model, logger=fake_logger, event_queue=event_queue)
+
+        worker.run()
+
+        assert event_queue.get_nowait() == ("error", "wrapped")
+        assert caplog.records[-1].levelname == "ERROR"
+        assert "ValueError" in caplog.text
+        assert "inner" in caplog.text
+
 
 class TestIODModelLoaderWorker:
     """Tests for IODModelLoaderWorker.run."""
@@ -91,3 +112,16 @@ class TestIODModelLoaderWorker:
         worker.run()
 
         assert event_queue.get_nowait() == ("error", "bad table_id")
+
+    def test_chained_exception_only_queues_the_outer_message_but_logs_the_full_chain(self, fake_logger, caplog):
+        """A chained exception's cause/traceback are dropped from the queued message, but logged in full."""
+        event_queue = queue.Queue()
+        model = FakeModel(error=_chained_runtime_error())
+        worker = IODModelLoaderWorker(model=model, table_id="table_A.2-1", logger=fake_logger, event_queue=event_queue)
+
+        worker.run()
+
+        assert event_queue.get_nowait() == ("error", "wrapped")
+        assert caplog.records[-1].levelname == "ERROR"
+        assert "ValueError" in caplog.text
+        assert "inner" in caplog.text
