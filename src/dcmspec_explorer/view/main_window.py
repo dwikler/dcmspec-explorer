@@ -92,7 +92,7 @@ class MainWindow(QMainWindow):
     def get_portable_monospace_font(self, size: Optional[int] = None) -> QFont:
         """Get a monospace font that is likely to be available on most platforms."""
         candidates = ["Menlo", "Consolas", "DejaVu Sans Mono", "Liberation Mono", "Monaco", "Courier New", "Courier"]
-        available = QFontDatabase().families()
+        available = QFontDatabase.families()
         for fam in candidates:
             if fam in available:
                 return QFont(fam) if size is None else QFont(fam, size)
