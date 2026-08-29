@@ -125,7 +125,7 @@ class IODTreeViewModelAdapter:
             item_favorite_flag = QStandardItem()
 
             # Set the favorite icon if the item is a favorite
-            is_favorite = self.favorites_manager and self.favorites_manager.is_favorite(iod.table_id)
+            is_favorite = bool(self.favorites_manager and self.favorites_manager.is_favorite(iod.table_id))
             item_favorite_flag.setData(is_favorite, IS_FAVORITE_ROLE)
 
             # Store table_id and iod_type as data for later retrieval

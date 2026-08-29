@@ -33,6 +33,20 @@ jobs:
       - name: Install dependencies
         run: poetry install --with dev
 
+      # ubuntu-latest's base image ships none of the shared libraries PySide6 dynamically
+      # links against, even under QT_QPA_PLATFORM=offscreen (which only skips needing a real
+      # X server, not these libraries). Verified against a real ubuntu:24.04 (amd64) container:
+      # constructing a QApplication + QMainWindow/.show()/QMenu/QDialog (as the wiring tests do)
+      # needs all of these to import and run without an ImportError.
+      - name: Install Qt runtime dependencies (Linux, for offscreen tests)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libfontconfig1 libfreetype6 libxkbcommon0 libxkbcommon-x11-0 \
+            libdbus-1-3 libx11-xcb1 libxrender1 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 \
+            libsm6 libice6 libglib2.0-0t64
+
       # Runs the same checks as the local pre-commit hooks, so CI still catches lint/type
       # issues even if a contributor commits with --no-verify.
       - name: Run ruff check
@@ -45,4 +59,6 @@ jobs:
         run: poetry run mypy --ignore-missing-imports .
 
       - name: Run pytest
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: poetry run pytest -v tests/unit tests/integration

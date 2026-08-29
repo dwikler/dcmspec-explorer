@@ -42,6 +42,7 @@ class IODListLoaderWorker:
             )
             self.event_queue.put(("loaded", iod_entry_list))
         except Exception as e:
+            self.logger.exception("Failed to load IOD list")
             self.event_queue.put(("error", str(e)))
 
 
@@ -71,4 +72,5 @@ class IODModelLoaderWorker:
             iod_model = self.model.load_iod_model(self.table_id, self.logger, progress_observer=progress_observer)
             self.event_queue.put(("loaded", iod_model))
         except Exception as e:
+            self.logger.exception(f"Failed to load IOD model for table_id: {self.table_id}")
             self.event_queue.put(("error", str(e)))
