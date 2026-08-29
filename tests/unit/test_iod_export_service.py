@@ -228,21 +228,51 @@ class TestHtmlToText:
     """Tests for IODExportWorker._html_to_text."""
 
     def test_strips_tags_and_extracts_readable_text(self):
-        """Anchors, notes, and other markup collapse into their plain-text content."""
+        """Anchors and other markup collapse into their plain-text content."""
         html = '<p>\n<a id="para_427a23ce" shape="rect"/>Patient\'s full name.</p>'
         assert IODExportWorker._html_to_text(html) == "Patient's full name."
 
-    def test_note_div_content_is_preserved_as_text(self):
-        """A nested <div class="note"> block's text is kept, not dropped."""
+    def test_note_div_content_is_preserved_on_its_own_paragraph(self):
+        """A nested <div class="note">'s heading and paragraph become blank-line-separated blocks."""
         html = (
             "<p>Primary identifier for the Patient.</p>"
             '<div class="note"><h3 class="title">Note</h3>'
             '<p>See <a href="#sect">Section C.7.1.4.1.1</a>.</p></div>'
         )
+        assert IODExportWorker._html_to_text(html) == (
+            "Primary identifier for the Patient.\n\nNote\n\nSee Section C.7.1.4.1.1."
+        )
+
+    def test_definition_list_terms_are_not_dropped(self):
+        """A <dl>/<dt>/<dd> enumerated-values list (e.g. Patient's Sex) keeps every term and value.
+
+        Regression test: an earlier hand-rolled BeautifulSoup-based extraction silently dropped
+        <dt> content because it wasn't in its block-tag whitelist. inscriptis renders the full DOM
+        instead of relying on a tag whitelist, so nothing is silently lost.
+        """
+        html = (
+            "<p>Sex of the named Patient.</p>"
+            '<div class="variablelist"><p class="title"><strong>Enumerated Values:</strong></p>'
+            '<dl class="variablelist compact">'
+            '<dt><span class="term">M</span></dt><dd><p>male</p></dd>'
+            '<dt><span class="term">F</span></dt><dd><p>female</p></dd>'
+            "</dl></div>"
+            "<p>See Note 2 and Note 3.</p>"
+        )
         text = IODExportWorker._html_to_text(html)
-        assert "Primary identifier for the Patient." in text
-        assert "Note" in text
-        assert "See Section C.7.1.4.1.1" in text
+        expected_fragments = ("Sex of the named Patient.", "M", "male", "F", "female", "See Note 2 and Note 3.")
+        assert all(fragment in text for fragment in expected_fragments)
+
+    def test_no_markdown_syntax_leaks_through(self):
+        """Headings, blockquotes, code spans, and horizontal rules produce no Markdown syntax."""
+        html = (
+            '<p>See <a href="#x">link</a> and <strong>bold</strong> and <code>code</code> and:</p>'
+            "<blockquote>a quote</blockquote>"
+            "<hr/>"
+            "<h3>Note</h3>"
+        )
+        text = IODExportWorker._html_to_text(html)
+        assert all(markdown_char not in text for markdown_char in ("#", ">", "`", "---"))
 
     def test_no_markup_is_returned_as_is(self):
         """Plain text with no HTML markup passes through unchanged (aside from stripping)."""

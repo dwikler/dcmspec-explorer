@@ -525,6 +525,25 @@ files = [
 ]
 
 [[package]]
+name = "inscriptis"
+version = "2.7.4"
+description = "inscriptis - HTML to text converter."
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "inscriptis-2.7.4-py3-none-any.whl", hash = "sha256:7155ca6be02ccbc5e10272fe3b143f8793be9a6b3f537b4d3fb8a3c2b4e956bc"},
+    {file = "inscriptis-2.7.4.tar.gz", hash = "sha256:8735e3a12f32b48e345d77ef059339b445f687a553fb255eb4812d6414c05b11"},
+]
+
+[package.dependencies]
+lxml = ">=5.4.0,<6.2.0"
+requests = ">=2.32.3,<3.0.0"
+
+[package.extras]
+web-service = ["fastapi (>=0.118.0,<1.0.0)", "uvicorn (>=0.38.0,<1.0.0)"]
+
+[[package]]
 name = "lxml"
 version = "5.4.0"
 description = "Powerful and Pythonic XML processing library combining libxml2/libxslt with the ElementTree API."
@@ -1246,4 +1265,4 @@ python-discovery = ">=1.4.2"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "665d8824af195bd9fd3d391954f6656e35d130a308d193cd761c063193ccef78"
+content-hash = "d39d6db23ec9175e58ffc50d128589cf8e195fc968c17f164b71334f7614b465"

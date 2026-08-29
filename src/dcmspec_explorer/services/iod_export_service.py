@@ -6,10 +6,17 @@ import queue
 import threading
 from typing import Any
 
-import html2text
 from anytree import PreOrderIter
+from inscriptis import get_text
+from inscriptis.css_profiles import CSS_PROFILES
+from inscriptis.model.config import ParserConfig
 
 from dcmspec.iod_spec_printer import IODSpecPrinter
+
+# Minimize inscriptis' layout-aware indentation, which is meant for approximating how a browser
+# would visually lay out a full page; for a single description field in a spreadsheet cell, only
+# its paragraph/list structure is wanted, not left-padding derived from HTML nesting depth.
+_HTML_TO_TEXT_CONFIG = ParserConfig(css=CSS_PROFILES["strict"])
 
 # Node attributes dcmspec-explorer's Model deliberately parses as raw HTML (see model.py's
 # `unformatted=False` settings) so they can be rendered richly in the details pane. Exported files
@@ -69,10 +76,5 @@ class IODExportWorker:
 
     @staticmethod
     def _html_to_text(html: str) -> str:
-        """Convert an HTML fragment to plain text, matching dcmspec's own html2text configuration."""
-        converter = html2text.HTML2Text()
-        converter.ignore_links = True
-        converter.ignore_images = True
-        converter.ignore_emphasis = True
-        converter.body_width = 0
-        return converter.handle(html).strip()
+        """Convert an HTML fragment to plain text, preserving paragraph/list structure."""
+        return get_text(html, _HTML_TO_TEXT_CONFIG).strip()
