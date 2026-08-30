@@ -6,11 +6,18 @@ loop, with a FakeModel whose load methods return or raise immediately so the
 background thread finishes fast and the tests stay deterministic and non-flaky.
 """
 
+import pathlib
+
+from anytree import Node
+from openpyxl import load_workbook
+
 from dcmspec.progress import Progress
+from dcmspec.spec_model import SpecModel
 
 from dcmspec_explorer.services.service_mediator import (
     IODListLoaderServiceMediator,
     IODModelLoaderServiceMediator,
+    IODExportServiceMediator,
 )
 
 
@@ -162,3 +169,119 @@ class TestOverlappingWorkerStartsHazard:
 
         mediator.cleanup_worker_thread()
         mediator.cleanup_worker_thread()
+
+
+class TestIODExportServiceMediatorHappyPath:
+    """Tests for IODExportServiceMediator's signal emission and cleanup on real worker events.
+
+    Unlike the loader mediators above, these drive the real IODExportWorker against a real
+    (minimal) SpecModel and the real dcmspec IODSpecPrinter, so the assertions cover the actual
+    file written to disk, not just the emitted signal payload.
+    """
+
+    @staticmethod
+    def _make_iod_model():
+        """Return a minimal real SpecModel with one module and one attribute, for real IODSpecPrinter export."""
+        metadata = Node("metadata")
+        metadata.header = ["Attr1", "Attr2"]
+        metadata.column_to_attr = {0: "attr1", 1: "attr2"}
+        content = Node("content")
+        module_node = Node("module1", parent=content)
+        module_node.module = "Patient"
+        module_node.usage = "M"
+        attr_node = Node("attr", parent=module_node)
+        attr_node.attr1 = "Value1"
+        attr_node.attr2 = "Value2"
+        model = SpecModel(metadata=metadata, content=content)
+        model._is_include = lambda node: False
+        model._is_title = lambda node: False
+        return model
+
+    def test_loaded_event_writes_real_csv_file_and_cleans_up(self, qtbot, fake_logger, tmp_path):
+        """A real csv export via IODSpecPrinter writes the file and emits iodexport_loaded_signal."""
+        output_path = str(tmp_path / "export.csv")
+        mediator = IODExportServiceMediator(model=None, logger=fake_logger)
+
+        with qtbot.waitSignal(mediator.iodexport_loaded_signal, timeout=1000) as blocker:
+            mediator.start_export_worker(iod_model=self._make_iod_model(), fmt="csv", output_path=output_path)
+
+        emitted_mediator, emitted_path = blocker.args
+        assert emitted_mediator is mediator
+        assert emitted_path == output_path
+        content = pathlib.Path(output_path).read_text(encoding="utf-8")
+        assert "Value1" in content
+        assert "Value2" in content
+        assert not hasattr(mediator, "_worker")
+        assert not hasattr(mediator, "_thread")
+        assert not mediator._poll_timer.isActive()
+
+    @staticmethod
+    def _make_iod_model_with_html_description():
+        """Return a real SpecModel shaped like dcmspec-explorer's actual module attribute table.
+
+        Uses the real column_to_attr ({0: "elem_name", 1: "elem_tag", 2: "elem_type",
+        3: "elem_description"}) from Model.load_iod_model, with an HTML elem_description like the
+        one PS3.3's XHTML actually produces, to exercise the real end-to-end HTML-to-text
+        conversion path through IODExportWorker._to_plain_text_model.
+        """
+        metadata = Node("metadata")
+        metadata.header = ["Name", "Tag", "Type", "Description"]
+        metadata.column_to_attr = {0: "elem_name", 1: "elem_tag", 2: "elem_type", 3: "elem_description"}
+        content = Node("content")
+        module_node = Node("module1", parent=content)
+        module_node.module = "Patient"
+        module_node.usage = "M"
+        attr_node = Node("attr", parent=module_node)
+        attr_node.elem_name = "Patient's Name"
+        attr_node.elem_tag = "(0010,0010)"
+        attr_node.elem_type = "2"
+        attr_node.elem_description = '<p>\n<a id="para_427a" shape="rect"/>Patient\'s full name.</p>'
+        model = SpecModel(metadata=metadata, content=content)
+        model._is_include = lambda node: False
+        model._is_title = lambda node: False
+        return model
+
+    def test_loaded_event_converts_html_description_to_plain_text(self, qtbot, fake_logger, tmp_path):
+        """The exported CSV contains the plain-text description, not the raw HTML markup."""
+        output_path = str(tmp_path / "export_description.csv")
+        mediator = IODExportServiceMediator(model=None, logger=fake_logger)
+
+        with qtbot.waitSignal(mediator.iodexport_loaded_signal, timeout=1000):
+            mediator.start_export_worker(
+                iod_model=self._make_iod_model_with_html_description(), fmt="csv", output_path=output_path
+            )
+
+        content = pathlib.Path(output_path).read_text(encoding="utf-8")
+        assert "Patient's full name." in content
+        assert "<p>" not in content
+        assert "<a id=" not in content
+
+    def test_loaded_event_writes_real_xlsx_file(self, qtbot, fake_logger, tmp_path):
+        """A real xlsx export via IODSpecPrinter writes a readable workbook and emits the loaded signal."""
+        output_path = str(tmp_path / "export.xlsx")
+        mediator = IODExportServiceMediator(model=None, logger=fake_logger)
+
+        with qtbot.waitSignal(mediator.iodexport_loaded_signal, timeout=1000) as blocker:
+            mediator.start_export_worker(iod_model=self._make_iod_model(), fmt="xlsx", output_path=output_path)
+
+        _, emitted_path = blocker.args
+        assert emitted_path == output_path
+        workbook = load_workbook(output_path)
+        sheet = workbook[workbook.sheetnames[0]]
+        values = [cell.value for row in sheet.iter_rows() for cell in row]
+        assert "Value1" in values
+
+    def test_error_event_emits_error_signal_and_cleans_up(self, qtbot, fake_logger, tmp_path):
+        """An unsupported format emits iodexport_error_signal with the failure message."""
+        mediator = IODExportServiceMediator(model=None, logger=fake_logger)
+
+        with qtbot.waitSignal(mediator.iodexport_error_signal, timeout=1000) as blocker:
+            mediator.start_export_worker(
+                iod_model=self._make_iod_model(), fmt="pdf", output_path=str(tmp_path / "export.pdf")
+            )
+
+        _, message = blocker.args
+        assert message == "Unsupported export format: pdf"
+        assert not hasattr(mediator, "_worker")
+        assert not hasattr(mediator, "_thread")
+        assert not mediator._poll_timer.isActive()

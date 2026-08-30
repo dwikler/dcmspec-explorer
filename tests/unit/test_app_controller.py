@@ -50,6 +50,11 @@ _BOUND_METHOD_NAMES = [
     "_on_treeview_item_clicked",
     "get_selected_item_details",
     "_on_treeview_right_click",
+    "_export_iod_model",
+    "_connect_export_signals",
+    "_handle_export_loaded",
+    "_handle_export_error",
+    "_report_error",
     "_on_reload_clicked",
     "_toggle_favorite",
     "_safe_disconnect",
@@ -79,11 +84,13 @@ def make_controller_state(view, model, logger, favorites_manager=None, **overrid
         treeview_adapter=IODTreeViewModelAdapter(favorites_manager=favorites_manager),
         service=FakeMediator(),
         iod_model_service=FakeMediator(),
+        export_service=FakeMediator(),
         logger=logger,
         sort_column=None,
         sort_reverse=False,
         show_favorites_only=False,
         progress_dialog=None,
+        _normalize_export_filename=AppController._normalize_export_filename,
     )
     for name in _BOUND_METHOD_NAMES:
         setattr(fake_self, name, functools.partial(getattr(AppController, name), fake_self))
@@ -198,23 +205,27 @@ class FakeSignal:
 
 
 class FakeMediator:
-    """Fake service mediator standing in for either service or iod_model_service.
+    """Fake service mediator standing in for service, iod_model_service, or export_service.
 
-    Exposes both the iodlist_* and iodmodel_* signal attributes so a single instance can stand in
-    for AppController.service (IODListLoaderServiceMediator) or AppController.iod_model_service
-    (IODModelLoaderServiceMediator), as make_controller_state below uses it for both.
+    Exposes the iodlist_*, iodmodel_*, and iodexport_* signal attributes so a single instance can
+    stand in for AppController.service (IODListLoaderServiceMediator), AppController.iod_model_service
+    (IODModelLoaderServiceMediator), or AppController.export_service (IODExportServiceMediator), as
+    make_controller_state below uses it for all three.
     """
 
     def __init__(self):
-        """Initialize all six signal attributes and empty call-recording lists."""
+        """Initialize all eight signal attributes and empty call-recording lists."""
         self.iodlist_progress_signal = FakeSignal()
         self.iodlist_loaded_signal = FakeSignal()
         self.iodlist_error_signal = FakeSignal()
         self.iodmodel_progress_signal = FakeSignal()
         self.iodmodel_loaded_signal = FakeSignal()
         self.iodmodel_error_signal = FakeSignal()
+        self.iodexport_loaded_signal = FakeSignal()
+        self.iodexport_error_signal = FakeSignal()
         self.start_iodlist_worker_calls = []
         self.start_iodmodel_worker_calls = []
+        self.start_export_worker_calls = []
 
     def start_iodlist_worker(self, force_download=False):
         """Record the call and return a dummy (worker, thread) pair."""
@@ -224,6 +235,11 @@ class FakeMediator:
     def start_iodmodel_worker(self, table_id):
         """Record the call and return a dummy (worker, thread) pair."""
         self.start_iodmodel_worker_calls.append(table_id)
+        return ("fake_worker", "fake_thread")
+
+    def start_export_worker(self, iod_model, fmt, output_path):
+        """Record the call and return a dummy (worker, thread) pair."""
+        self.start_export_worker_calls.append((iod_model, fmt, output_path))
         return ("fake_worker", "fake_thread")
 
 
@@ -339,8 +355,14 @@ class FakeUi:
 class FakeView:
     """Fake View mirroring MainWindow's documented setter contract, plus the `.ui` reach-ins."""
 
-    def __init__(self, ui=None):
-        """Initialize the `.ui` namespace and empty call-recording lists for every setter."""
+    def __init__(self, ui=None, save_file_return=None):
+        """Initialize the `.ui` namespace and empty call-recording lists for every setter.
+
+        Args:
+            ui: Optional FakeUi override.
+            save_file_return: Canned return value for prompt_save_file (None simulates Cancel).
+
+        """
         self.ui = ui if ui is not None else FakeUi()
         self.details_html_calls = []
         self.nodetails_html_calls = []
@@ -352,6 +374,8 @@ class FakeView:
         self.favorites_button_label_calls = []
         self.anchor_warning_calls = []
         self.url_warning_calls = []
+        self.prompt_save_file_calls = []
+        self._save_file_return = save_file_return
 
     def set_details_html(self, html_body):
         """Record the call."""
@@ -382,6 +406,11 @@ class FakeView:
         """Record the call."""
         self.sort_indicator_calls.append((sort_column, sort_reverse))
 
+    def prompt_save_file(self, title, default_name, file_filter):
+        """Record the call and return the configured canned path (or None for Cancel)."""
+        self.prompt_save_file_calls.append((title, default_name, file_filter))
+        return self._save_file_return
+
     def set_show_favorites_button_label(self, show_favorites):
         """Record the call."""
         self.favorites_button_label_calls.append(show_favorites)
@@ -405,22 +434,50 @@ class FakeQAction:
 
 
 class FakeQMenu:
-    """Fake QMenu recording added actions and exec() calls, for the monkeypatched QMenu tests."""
+    """Fake QMenu recording added actions/submenus and exec() calls, for the monkeypatched QMenu tests."""
 
     instances: list["FakeQMenu"] = []
 
-    def __init__(self, parent=None):
-        """Initialize and register self in the class-level instances list."""
+    def __init__(self, parent=None, title="", _register=True):
+        """Initialize and, for a top-level menu, register self in the class-level instances list.
+
+        Submenus (created via addMenu) pass _register=False so they don't also land in
+        `instances` — only the top-level QMenu(self.view) construction the controller performs
+        should be found there, matching the pre-submenu test contract of `instances[-1]`.
+        """
         self.parent = parent
+        self.title = title
         self.actions = []
+        self.submenus = {}
         self.exec_calls = []
-        FakeQMenu.instances.append(self)
+        self.enabled = True
+        self.tool_tip = ""
+        if _register:
+            FakeQMenu.instances.append(self)
 
     def addAction(self, text):
         """Record and return a new FakeQAction."""
         action = FakeQAction(text)
         self.actions.append(action)
         return action
+
+    def addMenu(self, title):
+        """Record and return a new FakeQMenu standing in for a submenu, keyed by title."""
+        submenu = FakeQMenu(parent=self, title=title, _register=False)
+        self.submenus[title] = submenu
+        return submenu
+
+    def setEnabled(self, enabled):
+        """Record the call."""
+        self.enabled = enabled
+
+    def menuAction(self):
+        """Return self, standing in for the QAction representing this submenu in its parent menu."""
+        return self
+
+    def setToolTip(self, tool_tip):
+        """Record the call."""
+        self.tool_tip = tool_tip
 
     def exec(self, pos):
         """Record the call."""
@@ -988,6 +1045,184 @@ class TestOnTreeviewRightClick:
         FakeQMenu.instances[-1].actions[0].triggered.connected[0]()
 
         assert favorites.add_calls == ["table_A.1-1"]
+
+    def test_export_submenu_disabled_with_tooltip_when_specmodel_not_loaded(self, fake_logger, monkeypatch):
+        """The Export submenu is disabled with an explanatory tooltip if the IOD hasn't been loaded yet."""
+        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
+        FakeQMenu.instances.clear()
+        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
+        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
+        index = qt_model.indexFromItem(qt_model.item(0, 0))
+        state = make_controller_state(
+            view=FakeView(),
+            model=FakeModel(iod_specmodels={}),
+            logger=fake_logger,
+            favorites_manager=FakeFavoritesManager(),
+        )
+
+        state._on_treeview_right_click(index, global_pos="pos")
+
+        export_menu = FakeQMenu.instances[-1].submenus["Export"]
+        assert [action.text for action in export_menu.actions] == ["CSV...", "Excel..."]
+        assert export_menu.enabled is False
+        assert export_menu.tool_tip == "Select this IOD first to load it"
+
+    def test_export_submenu_enabled_when_specmodel_loaded(self, fake_logger, monkeypatch):
+        """The Export submenu is enabled once the IOD's specmodel is present in Model.iod_specmodels."""
+        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
+        FakeQMenu.instances.clear()
+        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
+        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
+        index = qt_model.indexFromItem(qt_model.item(0, 0))
+        state = make_controller_state(
+            view=FakeView(),
+            model=FakeModel(iod_specmodels={"table_A.1-1": "loaded_model"}),
+            logger=fake_logger,
+            favorites_manager=FakeFavoritesManager(),
+        )
+
+        state._on_treeview_right_click(index, global_pos="pos")
+
+        export_menu = FakeQMenu.instances[-1].submenus["Export"]
+        assert export_menu.enabled is True
+        assert export_menu.tool_tip == ""
+
+    def test_selecting_csv_export_action_calls_export_iod_model(self, fake_logger, monkeypatch):
+        """Triggering the "CSV..." action calls back into _export_iod_model with fmt="csv"."""
+        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
+        FakeQMenu.instances.clear()
+        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
+        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
+        index = qt_model.indexFromItem(qt_model.item(0, 0))
+        calls = []
+        state = make_controller_state(
+            view=FakeView(),
+            model=FakeModel(iod_specmodels={"table_A.1-1": "loaded_model"}),
+            logger=fake_logger,
+            favorites_manager=FakeFavoritesManager(),
+            _export_iod_model=lambda table_id, iod_name, fmt: calls.append((table_id, iod_name, fmt)),
+        )
+
+        state._on_treeview_right_click(index, global_pos="pos")
+        export_menu = FakeQMenu.instances[-1].submenus["Export"]
+        export_menu.actions[0].triggered.connected[0]()
+
+        assert calls == [("table_A.1-1", "Alpha", "csv")]
+
+    def test_selecting_excel_export_action_calls_export_iod_model(self, fake_logger, monkeypatch):
+        """Triggering the "Excel..." action calls back into _export_iod_model with fmt="xlsx"."""
+        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
+        FakeQMenu.instances.clear()
+        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
+        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
+        index = qt_model.indexFromItem(qt_model.item(0, 0))
+        calls = []
+        state = make_controller_state(
+            view=FakeView(),
+            model=FakeModel(iod_specmodels={"table_A.1-1": "loaded_model"}),
+            logger=fake_logger,
+            favorites_manager=FakeFavoritesManager(),
+            _export_iod_model=lambda table_id, iod_name, fmt: calls.append((table_id, iod_name, fmt)),
+        )
+
+        state._on_treeview_right_click(index, global_pos="pos")
+        export_menu = FakeQMenu.instances[-1].submenus["Export"]
+        export_menu.actions[1].triggered.connected[0]()
+
+        assert calls == [("table_A.1-1", "Alpha", "xlsx")]
+
+
+class TestNormalizeExportFilename:
+    """Tests for AppController._normalize_export_filename."""
+
+    def test_replaces_filesystem_unsafe_characters(self):
+        """Characters invalid in filenames on common filesystems are replaced with underscores."""
+        assert AppController._normalize_export_filename('A/B\\C:D*E?F"G<H>I|J') == "A_B_C_D_E_F_G_H_I_J"
+
+    def test_replaces_spaces_with_underscores(self):
+        """Spaces are replaced with underscores rather than left in the filename."""
+        assert AppController._normalize_export_filename("Basic Text SR IOD") == "Basic_Text_SR_IOD"
+
+    def test_collapses_consecutive_whitespace(self):
+        """A run of consecutive whitespace collapses to a single underscore."""
+        assert AppController._normalize_export_filename("A   B") == "A_B"
+
+    def test_blank_name_falls_back_to_export(self):
+        """An empty or whitespace-only name falls back to a generic default."""
+        assert AppController._normalize_export_filename("   ") == "export"
+
+
+class TestExportIodModel:
+    """Tests for AppController._export_iod_model."""
+
+    def test_cancelled_dialog_starts_no_worker(self, fake_logger):
+        """A None path (dialog cancelled) starts no export worker and leaves the status bar alone."""
+        view = FakeView(save_file_return=None)
+        state = make_controller_state(
+            view=view, model=FakeModel(iod_specmodels={"table_A.1-1": "loaded_model"}), logger=fake_logger
+        )
+
+        state._export_iod_model("table_A.1-1", "Alpha", "csv")
+
+        assert state.export_service.start_export_worker_calls == []
+        assert view.status_bar_calls == []
+
+    def test_csv_export_starts_worker_with_right_args(self, fake_logger):
+        """A confirmed CSV export starts the worker with the loaded specmodel, format, and chosen path."""
+        view = FakeView(save_file_return="/tmp/Alpha.csv")
+        state = make_controller_state(
+            view=view, model=FakeModel(iod_specmodels={"table_A.1-1": "loaded_model"}), logger=fake_logger
+        )
+
+        state._export_iod_model("table_A.1-1", "Alpha", "csv")
+
+        assert state.export_service.start_export_worker_calls == [("loaded_model", "csv", "/tmp/Alpha.csv")]
+        assert view.status_bar_calls == ["Exporting..."]
+        _, default_name, file_filter = view.prompt_save_file_calls[0]
+        assert default_name == "Alpha.csv"
+        assert file_filter == "CSV files (*.csv)"
+
+    def test_xlsx_export_uses_xlsx_default_name_and_filter(self, fake_logger):
+        """A confirmed Excel export proposes a .xlsx default filename and filter."""
+        view = FakeView(save_file_return="/tmp/Alpha.xlsx")
+        state = make_controller_state(
+            view=view, model=FakeModel(iod_specmodels={"table_A.1-1": "loaded_model"}), logger=fake_logger
+        )
+
+        state._export_iod_model("table_A.1-1", "Alpha", "xlsx")
+
+        assert state.export_service.start_export_worker_calls == [("loaded_model", "xlsx", "/tmp/Alpha.xlsx")]
+        _, default_name, file_filter = view.prompt_save_file_calls[0]
+        assert default_name == "Alpha.xlsx"
+        assert file_filter == "Excel files (*.xlsx)"
+
+
+class TestHandleExportLoaded:
+    """Tests for AppController._handle_export_loaded."""
+
+    def test_updates_status_bar_with_output_path(self, fake_logger):
+        """A successful export updates the status bar with the written file's path."""
+        view = FakeView()
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+
+        state._handle_export_loaded(sender=object(), output_path="/tmp/Alpha.csv")
+
+        assert view.status_bar_calls == ["Exported to /tmp/Alpha.csv"]
+
+
+class TestHandleExportError:
+    """Tests for AppController._handle_export_error."""
+
+    def test_shows_error_and_updates_status_bar(self, fake_logger, caplog):
+        """A failed export logs the error, shows it to the user, and updates the status bar."""
+        view = FakeView()
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+
+        with caplog.at_level(logging.ERROR):
+            state._handle_export_error(sender=object(), message="disk full")
+
+        assert view.error_calls == ["disk full"]
+        assert view.status_bar_calls == ["Error exporting IOD."]
 
 
 class TestToggleFavorite:
