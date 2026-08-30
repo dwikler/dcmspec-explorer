@@ -107,8 +107,12 @@ class AppController(QObject):
         self.view.iod_treeview_item_selected.connect(self._on_treeview_item_clicked)
         self.view.iod_treeview_right_click.connect(self._on_treeview_right_click)
         self.view.ui.detailsTextBrowser.anchorClicked.connect(self._on_details_link_clicked)
-        self.view.toggle_favorites_clicked.connect(self._on_toggle_favorites_clicked)
-        self.view.reload_clicked.connect(self._on_reload_clicked)
+        self.view.toggle_favorite_display_clicked.connect(self._on_toggle_favorite_display_clicked)
+        self.view.check_for_updates_clicked.connect(self._on_check_for_updates_clicked)
+        self.view.export_csv_action_triggered.connect(lambda: self._export_selected_iod("csv"))
+        self.view.export_xlsx_action_triggered.connect(lambda: self._export_selected_iod("xlsx"))
+        self.view.toggle_favorite_state_action_triggered.connect(self._on_toggle_favorite_state_action_triggered)
+        self.view.file_menu_about_to_show.connect(self._on_file_menu_about_to_show)
 
         # Initialize sorting state
         self.sort_column: Optional[int] = None  # No sorting on first load
@@ -140,7 +144,7 @@ class AppController(QObject):
         """Handle search box text change and update filtering."""
         self.apply_filter_and_sort()
 
-    def _on_toggle_favorites_clicked(self):
+    def _on_toggle_favorite_display_clicked(self):
         """Toggle between showing all IODs and only favorites."""
         self.show_favorites_only = not self.show_favorites_only
         self.view.set_show_favorites_button_label(self.show_favorites_only)
@@ -206,10 +210,7 @@ class AppController(QObject):
 
         # Create context menu for favorites management
         menu = QMenu(self.view)
-        if self.favorites_manager.is_favorite(table_id):
-            action = menu.addAction("Remove from favorites")
-        else:
-            action = menu.addAction("Add to favorites")
+        action = menu.addAction(self._favorite_action_label(table_id))
         # Connect to the signal triggered if the user selects the action
         action.triggered.connect(lambda: self._toggle_favorite(table_id))
 
@@ -218,7 +219,7 @@ class AppController(QObject):
         export_menu = menu.addMenu("Export")
         csv_action = export_menu.addAction("CSV...")
         xlsx_action = export_menu.addAction("Excel...")
-        is_loaded = table_id in self.model.iod_specmodels
+        is_loaded = self._is_iod_loaded(table_id)
         export_menu.setEnabled(is_loaded)
         if not is_loaded:
             export_menu.menuAction().setToolTip("Select this IOD first to load it")
@@ -226,6 +227,43 @@ class AppController(QObject):
         xlsx_action.triggered.connect(lambda: self._export_iod_model(table_id, iod_name, "xlsx"))
 
         menu.exec(global_pos)
+
+    def _favorite_action_label(self, table_id: str) -> str:
+        """Return the appropriate favorite toggle label for the given IOD's current favorite state."""
+        return "Remove from favorites" if self.favorites_manager.is_favorite(table_id) else "Add to favorites"
+
+    def _is_iod_loaded(self, table_id: str) -> bool:
+        """Return whether the given IOD's spec model has already been loaded."""
+        return table_id in self.model.iod_specmodels
+
+    def _export_selected_iod(self, fmt: str) -> None:
+        """Export the treeview's currently selected IOD, triggered from the File > Export menu."""
+        selected = self.view.get_selected_iod()
+        if selected is None:
+            return
+        table_id, iod_name = selected
+        self._export_iod_model(table_id, iod_name, fmt)
+
+    def _on_toggle_favorite_state_action_triggered(self) -> None:
+        """Toggle favorite status for the treeview's currently selected IOD, triggered from the File menu."""
+        selected = self.view.get_selected_iod()
+        if selected is None:
+            return
+        table_id, _ = selected
+        self._toggle_favorite(table_id)
+
+    def _on_file_menu_about_to_show(self) -> None:
+        """Refresh the Export and favorite items' enabled state to match the currently selected IOD."""
+        selected = self.view.get_selected_iod()
+        if selected is None:
+            self.view.set_export_menu_enabled(False, "Select an IOD first")
+            self.view.set_favorite_action(enabled=False, is_favorite=False)
+            return
+        table_id, _ = selected
+        is_loaded = self._is_iod_loaded(table_id)
+        tooltip = "" if is_loaded else "Select this IOD first to load it"
+        self.view.set_export_menu_enabled(is_loaded, tooltip)
+        self.view.set_favorite_action(enabled=True, is_favorite=self.favorites_manager.is_favorite(table_id))
 
     @staticmethod
     def _normalize_export_filename(name: str) -> str:
@@ -274,9 +312,9 @@ class AppController(QObject):
         self.view.show_error(message)
         self.view.update_status_bar(message=status_bar_message)
 
-    def _on_reload_clicked(self):
-        """Handle Reload button click: reload IOD list from the web."""
-        self.logger.info("Reload button clicked: reloading IOD list from web.")
+    def _on_check_for_updates_clicked(self):
+        """Handle Check for Updates button click: force a fresh download of the IOD list from the web."""
+        self.logger.info("Check for Updates button clicked: checking DICOM standard for updates.")
         self.view.update_status_bar(message="Downloading latest IOD modules from web...")
         # Start the worker in a background thread via the service mediator, forcing download
         self._treeview_worker, self._treeview_thread = self.service.start_iodlist_worker(force_download=True)

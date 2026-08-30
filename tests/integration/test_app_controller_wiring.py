@@ -20,6 +20,7 @@ visible right after the emit() call returns.
 
 import pytest
 from anytree import Node
+from PySide6.QtCore import QItemSelectionModel
 
 from dcmspec_explorer.controller.app_controller import AppController
 from dcmspec_explorer.controller.iod_treeview_adapter import IODTreeViewModelAdapter
@@ -50,11 +51,11 @@ def prevent_real_background_loads(monkeypatch):
     monkeypatch.setattr(IODModelLoaderServiceMediator, "start_iodmodel_worker", fake_start_iodmodel_worker)
 
 
-class TestReloadClickedWiring:
-    """Tests that the Reload button's signal reaches the real IOD list loader mediator."""
+class TestCheckForUpdatesClickedWiring:
+    """Tests that the Check for Updates button's signal reaches the real IOD list loader mediator."""
 
-    def test_reload_clicked_starts_iodlist_worker(self, qtbot, monkeypatch):
-        """Emitting reload_clicked calls through to IODListLoaderServiceMediator.start_iodlist_worker."""
+    def test_check_for_updates_clicked_starts_iodlist_worker(self, qtbot, monkeypatch):
+        """Emitting check_for_updates_clicked calls through to IODListLoaderServiceMediator.start_iodlist_worker."""
         calls = []
 
         def recording_start_iodlist_worker(self, force_download=False):
@@ -65,7 +66,7 @@ class TestReloadClickedWiring:
         controller = AppController()
         qtbot.addWidget(controller.view)
 
-        controller.view.reload_clicked.emit()
+        controller.view.check_for_updates_clicked.emit()
 
         assert calls == [True]
 
@@ -104,3 +105,79 @@ class TestTreeviewItemSelectedWiring:
         controller.view.iod_treeview_item_selected.emit(index)
 
         assert "Alpha" in controller.view.ui.detailsTextBrowser.toPlainText()
+
+
+def _select_iod_row(controller, qt_model):
+    """Select the treeview's single top-level row, as a user click would."""
+    controller.view.update_treeview(qt_model)
+    index = qt_model.indexFromItem(qt_model.item(0, 0))
+    controller.view.ui.iodTreeView.selectionModel().setCurrentIndex(
+        index, QItemSelectionModel.SelectionFlag.ClearAndSelect
+    )
+
+
+class TestToggleFavoriteMenuActionWiring:
+    """Tests that the File menu's favorite action reaches the real FavoritesManager."""
+
+    def test_triggering_action_adds_selected_iod_to_favorites(self, qtbot, monkeypatch, tmp_path):
+        """Triggering File > favorite action for the selected IOD adds it to favorites.
+
+        Points DCMSPEC_EXPLORER_CONFIG at a tmp_path file so FavoritesManager (which persists
+        favorites.json next to the active config file) never touches the real project config/
+        directory: the patch_dirs autouse fixture only patches platformdirs' user config
+        location, not the "config/ in the project root" fallback that load_app_config falls
+        back to when run from the repo root, and this test is the only one in this module whose
+        wiring has a real filesystem side effect.
+        """
+        config_path = tmp_path / "dcmspec_explorer_config.json"
+        config_path.write_text("{}")  # must exist on disk: load_app_config skips a missing override path
+        monkeypatch.setenv("DCMSPEC_EXPLORER_CONFIG", str(config_path))
+        controller = AppController()
+        qtbot.addWidget(controller.view)
+        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
+        qt_model = controller.treeview_adapter.populate_treeview_model_top_level([entry])
+        _select_iod_row(controller, qt_model)
+
+        controller.view.ui.actionToggleFavorite.trigger()
+
+        assert controller.favorites_manager.is_favorite("table_A.1-1")
+
+
+class TestFileMenuAboutToShowWiring:
+    """Tests that showing the File menu refreshes the Export submenu's and favorite action's state."""
+
+    def test_no_selection_disables_export_submenu_and_favorite_action(self, qtbot):
+        """With no IOD selected, opening the File menu disables both Export and the favorite action."""
+        controller = AppController()
+        qtbot.addWidget(controller.view)
+
+        controller.view.ui.menuFile.aboutToShow.emit()
+
+        assert controller.view.ui.menuExport.isEnabled() is False
+        assert controller.view.ui.actionToggleFavorite.isEnabled() is False
+
+    def test_selected_and_loaded_iod_enables_export_submenu(self, qtbot):
+        """Once the selected IOD's spec model is loaded, opening the File menu enables Export."""
+        controller = AppController()
+        qtbot.addWidget(controller.view)
+        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
+        qt_model = controller.treeview_adapter.populate_treeview_model_top_level([entry])
+        _select_iod_row(controller, qt_model)
+        controller.model.iod_specmodels["table_A.1-1"] = _dummy_content()
+
+        controller.view.ui.menuFile.aboutToShow.emit()
+
+        assert controller.view.ui.menuExport.isEnabled() is True
+
+    def test_selected_iod_enables_favorite_action_with_add_label(self, qtbot):
+        """Selecting a non-favorited IOD and opening the File menu enables the action, labeled "Add"."""
+        controller = AppController()
+        qtbot.addWidget(controller.view)
+        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
+        qt_model = controller.treeview_adapter.populate_treeview_model_top_level([entry])
+        _select_iod_row(controller, qt_model)
+
+        controller.view.ui.menuFile.aboutToShow.emit()
+
+        assert controller.view.ui.actionToggleFavorite.isEnabled() is True
+        assert controller.view.ui.actionToggleFavorite.text() == "Add to favorites"
