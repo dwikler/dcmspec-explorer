@@ -59,6 +59,8 @@ class MainWindow(QMainWindow):
         header_font = QFont(default_font.family(), default_font.pointSize() - 1, QFont.Bold)
         header.setFont(header_font)
         header.setSectionsClickable(True)
+        # Prevent the last column (Favorite) from auto-stretching to fill leftover space
+        header.setStretchLastSection(False)
 
         # Add custom context menu for the treeview
         self.ui.iodTreeView.setContextMenuPolicy(Qt.CustomContextMenu)
