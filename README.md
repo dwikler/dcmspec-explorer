@@ -89,3 +89,10 @@ The list of your favorite IODs is stored in a file named `favorites.json` in the
 - This makes it easy to back up or migrate your settings and favorites together.
 
 > **Tip:** To move your configuration and favorites to another machine, simply copy both your config file and `favorites.json` from the same directory.
+
+## Credits
+
+Icons from:
+- Wolf Kit Solid Glyph Icons Collection by [Thewolfkit](https://www.figma.com/@thewolfkit?ref=svgrepo.com),
+via [SVG Repo](https://www.svgrepo.com/), licensed under
+[CC Attribution](https://creativecommons.org/licenses/by/4.0/). Recolored and resized.

@@ -2,7 +2,7 @@
 
 import pytest
 from anytree import Node
-from PySide6.QtGui import QStandardItem
+from PySide6.QtGui import QStandardItem, QIcon, QPixmap, QColor
 
 from dcmspec_explorer.controller.iod_treeview_adapter import IODTreeViewModelAdapter, COLUMN_INDEX
 from dcmspec_explorer.model.model import IODEntry
@@ -12,6 +12,13 @@ from dcmspec_explorer.qt.qt_roles import TABLE_ID_ROLE, TABLE_URL_ROLE, NODE_PAT
 def _plain_standard_item():
     """Return a fresh QStandardItem with no data set, for building item trees by hand."""
     return QStandardItem()
+
+
+def _solid_icon(color):
+    """Return a QIcon wrapping a small solid-color pixmap, distinguishable from other icons."""
+    pixmap = QPixmap(4, 4)
+    pixmap.fill(QColor(color))
+    return QIcon(pixmap)
 
 
 def _standard_item_with_table_id(table_id):
@@ -42,11 +49,16 @@ class FakeIodModel:
 
 
 class FakeDataModel:
-    """Fake data model exposing only the .iod_specmodels property the adapter reads."""
+    """Fake data model exposing only the .iod_specmodels property and cache-check the adapter reads."""
 
-    def __init__(self, iod_specmodels=None):
-        """Initialize with the given table_id -> FakeIodModel mapping."""
+    def __init__(self, iod_specmodels=None, cached_table_ids=None):
+        """Initialize with the given table_id -> FakeIodModel mapping and cached table_ids."""
         self.iod_specmodels = iod_specmodels or {}
+        self._cached_table_ids = set(cached_table_ids or [])
+
+    def is_iod_model_cached(self, table_id):
+        """Return whether table_id is in the cached table_ids set."""
+        return table_id in self._cached_table_ids
 
 
 @pytest.fixture
@@ -290,6 +302,36 @@ class TestBuildTreeviewModelAlreadyLoadedChildren:
         assert selected_row is None
 
 
+class TestBuildTreeviewModelCacheStatusIcon:
+    """Tests for IODTreeViewModelAdapter.build_treeview_model's per-row cache-status icon."""
+
+    def test_cached_table_id_gets_cached_icon(self, qapp):
+        """A row whose table_id is reported cached by data_model shows the cached icon."""
+        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
+        cached_icon = _solid_icon("green")
+        uncached_icon = _solid_icon("gray")
+        adapter = IODTreeViewModelAdapter(cached_icon=cached_icon, uncached_icon=uncached_icon)
+        data_model = FakeDataModel(cached_table_ids={"table_A.1-1"})
+
+        qt_model, _ = adapter.build_treeview_model([entry], data_model)
+
+        status_item = qt_model.item(0, COLUMN_INDEX["status"])
+        assert status_item.icon().cacheKey() == cached_icon.cacheKey()
+
+    def test_uncached_table_id_gets_uncached_icon(self, qapp):
+        """A row whose table_id is not reported cached by data_model shows the uncached icon."""
+        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
+        cached_icon = _solid_icon("green")
+        uncached_icon = _solid_icon("gray")
+        adapter = IODTreeViewModelAdapter(cached_icon=cached_icon, uncached_icon=uncached_icon)
+        data_model = FakeDataModel()
+
+        qt_model, _ = adapter.build_treeview_model([entry], data_model)
+
+        status_item = qt_model.item(0, COLUMN_INDEX["status"])
+        assert status_item.icon().cacheKey() == uncached_icon.cacheKey()
+
+
 class TestPopulateTreeviewModelItem:
     """Tests for IODTreeViewModelAdapter.populate_treeview_model_item's anytree traversal."""
 
@@ -305,8 +347,8 @@ class TestPopulateTreeviewModelItem:
 
         assert parent_item.rowCount() == 1
         assert parent_item.child(0, 0).text() == "Patient"
-        assert parent_item.child(0, 1).text() == "Module"
-        assert parent_item.child(0, 2).text() == "M"
+        assert parent_item.child(0, COLUMN_INDEX["kind"]).text() == "Module"
+        assert parent_item.child(0, COLUMN_INDEX["usage"]).text() == "M"
 
     def test_attribute_node_produces_attribute_row_with_tag_and_name(self):
         """A node with an .elem_name attribute and a tag produces an "{tag} {name}" Attribute row."""
@@ -320,8 +362,8 @@ class TestPopulateTreeviewModelItem:
         IODTreeViewModelAdapter.populate_treeview_model_item(parent_item, content)
 
         assert parent_item.child(0, 0).text() == "(0010,0010) PatientName"
-        assert parent_item.child(0, 1).text() == "Attribute"
-        assert parent_item.child(0, 2).text() == "1"
+        assert parent_item.child(0, COLUMN_INDEX["kind"]).text() == "Attribute"
+        assert parent_item.child(0, COLUMN_INDEX["usage"]).text() == "1"
 
     def test_attribute_node_without_tag_shows_name_only(self):
         """An empty elem_tag falls back to showing the bare elem_name."""
@@ -380,6 +422,19 @@ class TestPopulateTreeviewModelItem:
 
         assert parent_item.child(0, 0).data(NODE_PATH_ROLE) == "content/PatientModule"
 
+    def test_child_row_status_column_carries_no_icon(self):
+        """A Module/Attribute child row's status-column item is blank: cache status is IOD-level only."""
+        content = Node("content")
+        module = Node("PatientModule", parent=content)
+        module.module = "Patient"
+        module.usage = "Mandatory"
+        parent_item = _plain_standard_item()
+
+        IODTreeViewModelAdapter.populate_treeview_model_item(parent_item, content)
+
+        status_item = parent_item.child(0, COLUMN_INDEX["status"])
+        assert status_item.icon().isNull()
+
 
 class TestPopulateIodEntryChildren:
     """Tests for IODTreeViewModelAdapter.populate_iod_entry_children."""
@@ -394,7 +449,7 @@ class TestPopulateIodEntryChildren:
         module.module = "Patient"
         module.usage = "Mandatory"
 
-        result = IODTreeViewModelAdapter.populate_iod_entry_children(tree_model, "table_A.1-1", content)
+        result = adapter.populate_iod_entry_children(tree_model, "table_A.1-1", content)
 
         assert result is True
         assert tree_model.item(0, 0).rowCount() == 1
@@ -406,6 +461,28 @@ class TestPopulateIodEntryChildren:
         tree_model = adapter.populate_treeview_model_top_level([entry])
         content = Node("content")
 
-        result = IODTreeViewModelAdapter.populate_iod_entry_children(tree_model, "table_unknown", content)
+        result = adapter.populate_iod_entry_children(tree_model, "table_unknown", content)
 
         assert result is False
+
+    def test_sets_status_column_icon_to_cached_on_successful_populate(self, qapp):
+        """A successful populate refreshes the row's status-column icon to cached_icon.
+
+        Regression test: a successful load always means the model is now on disk, whether it
+        started cached or not, so the icon must flip immediately rather than staying stale
+        until some unrelated later rebuild.
+        """
+        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
+        cached_icon = _solid_icon("green")
+        uncached_icon = _solid_icon("gray")
+        adapter = IODTreeViewModelAdapter(cached_icon=cached_icon, uncached_icon=uncached_icon)
+        tree_model = adapter.populate_treeview_model_top_level([entry])
+        # Start the row off showing the uncached icon, as build_treeview_model would for an
+        # IOD not yet cached, so the transition (not just the end state) is actually verified.
+        tree_model.item(0, COLUMN_INDEX["status"]).setIcon(uncached_icon)
+        content = Node("content")
+
+        adapter.populate_iod_entry_children(tree_model, "table_A.1-1", content)
+
+        status_item = tree_model.item(0, COLUMN_INDEX["status"])
+        assert status_item.icon().cacheKey() == cached_icon.cacheKey()

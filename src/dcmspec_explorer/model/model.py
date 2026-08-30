@@ -201,7 +201,7 @@ class Model:
         # Define Part 3 URL and file names
         url = self.PART3_XHTML_URL
         cache_file_name = self.PART3_XHTML_CACHE_FILE_NAME
-        model_file_name = f"Part3_{table_id}_expanded.json"
+        model_file_name = self._iod_model_cache_file_name(table_id)
 
         # Determine if this is a composite or normalized IOD
         composite_iod = "_A." in table_id
@@ -582,6 +582,27 @@ class Model:
 
     def _model_cache_dir(self) -> str:
         return os.path.join(self.config.cache_dir, "model")
+
+    def _iod_model_cache_file_name(self, table_id: str) -> str:
+        return f"Part3_{table_id}_expanded.json"
+
+    def _iod_model_cache_path(self, table_id: str) -> str:
+        return os.path.join(self._model_cache_dir(), self._iod_model_cache_file_name(table_id))
+
+    def is_iod_model_cached(self, table_id: str) -> bool:
+        """Return whether the given IOD's spec model is already cached on disk.
+
+        This only checks for the cache file's existence (a cheap stat() call); it does not load
+        or parse it.
+
+        Args:
+            table_id (str): The table identifier (e.g., "table_A.49-1").
+
+        Returns:
+            bool: True if a cache file exists for this table_id, False otherwise.
+
+        """
+        return os.path.exists(self._iod_model_cache_path(table_id))
 
     def _versioned_dir(self, version: str) -> str:
         return os.path.join(self.config.cache_dir, version)

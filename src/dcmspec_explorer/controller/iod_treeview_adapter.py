@@ -12,19 +12,28 @@ from dcmspec_explorer.qt.qt_roles import TABLE_ID_ROLE, TABLE_URL_ROLE, NODE_PAT
 # Define mapping of column names to their indices
 COLUMN_INDEX = {
     "name": 0,
-    "kind": 1,
-    "usage": 2,
-    "favorite": 3,
+    "status": 1,
+    "kind": 2,
+    "usage": 3,
+    "favorite": 4,
 }
 
 
 class IODTreeViewModelAdapter:
     """Adapt IOD data model to Qt treeview model."""
 
-    def __init__(self, favorites_manager: Optional[FavoritesManager] = None, heart_icon: Optional[QIcon] = None):
+    def __init__(
+        self,
+        favorites_manager: Optional[FavoritesManager] = None,
+        heart_icon: Optional[QIcon] = None,
+        cached_icon: Optional[QIcon] = None,
+        uncached_icon: Optional[QIcon] = None,
+    ):
         """Initialize the adapter with an optional favorites manager."""
         self.favorites_manager = favorites_manager
         self.heart_icon = heart_icon
+        self.cached_icon = cached_icon
+        self.uncached_icon = uncached_icon
 
     @staticmethod
     def get_table_id_for_item(item: QStandardItem) -> Optional[str]:
@@ -99,6 +108,11 @@ class IODTreeViewModelAdapter:
         for row in range(treeview_qt_model.rowCount()):
             item = treeview_qt_model.item(row, 0)
             table_id = item.data(TABLE_ID_ROLE)
+            # Show whether this IOD's spec model is already cached on disk, so the user can tell
+            # what a click will cost (instant local load vs. a network fetch) before clicking.
+            status_icon = self.cached_icon if data_model.is_iod_model_cached(table_id) else self.uncached_icon
+            if status_icon:
+                treeview_qt_model.item(row, COLUMN_INDEX["status"]).setIcon(status_icon)
             if loaded_children and table_id in loaded_children:
                 self.populate_treeview_model_item(item, loaded_children[table_id])
             if selected_table_id and table_id == selected_table_id:
@@ -116,10 +130,11 @@ class IODTreeViewModelAdapter:
 
         """
         model = QStandardItemModel()
-        model.setHorizontalHeaderLabels(["Name", "Kind", "", ""])
+        model.setHorizontalHeaderLabels(["Name", "", "Kind", "", ""])
 
         for iod in iod_list:
             item_name = QStandardItem(iod.name)
+            item_status = QStandardItem("")  # Cache-status icon set later, once data_model is available
             item_kind = QStandardItem(iod.kind)
             item_usage = QStandardItem("")  # Usage column is empty for now
             item_favorite_flag = QStandardItem()
@@ -132,12 +147,11 @@ class IODTreeViewModelAdapter:
             item_name.setData(iod.table_id, role=TABLE_ID_ROLE)
             item_name.setData(iod.table_url, role=TABLE_URL_ROLE)
 
-            model.appendRow([item_name, item_kind, item_usage, item_favorite_flag])
+            model.appendRow([item_name, item_status, item_kind, item_usage, item_favorite_flag])
 
         return model
 
-    @staticmethod
-    def populate_iod_entry_children(tree_model: QStandardItemModel, table_id: str, content: Node) -> bool:
+    def populate_iod_entry_children(self, tree_model: QStandardItemModel, table_id: str, content: Node) -> bool:
         """Add children items to the IODEntry item in the treeview model.
 
         Args:
@@ -152,7 +166,12 @@ class IODTreeViewModelAdapter:
         for row in range(tree_model.rowCount()):
             item = tree_model.item(row, 0)
             if item.data(TABLE_ID_ROLE) == table_id:
-                IODTreeViewModelAdapter.populate_treeview_model_item(item, content)
+                self.populate_treeview_model_item(item, content)
+                # A successful load always means the model is now cached on disk, regardless of
+                # whether it started cached or not, so refresh the status icon immediately rather
+                # than leaving it stale until some later, unrelated treeview rebuild.
+                if self.cached_icon:
+                    tree_model.item(row, COLUMN_INDEX["status"]).setIcon(self.cached_icon)
                 return True
         return False
 
@@ -194,6 +213,7 @@ class IODTreeViewModelAdapter:
 
             # Create QStandardItems for each column
             name = QStandardItem(display_text)
+            status = QStandardItem("")  # Cache status is an IOD-level concept; blank for children
             kind = QStandardItem(node_type)
             usage = QStandardItem(usage)
             favorite_flag = QStandardItem("")
@@ -203,5 +223,5 @@ class IODTreeViewModelAdapter:
             name.setData(node_path, role=NODE_PATH_ROLE)
 
             # Append the row to the parent tree item
-            parent_tree_item.appendRow([name, kind, usage, favorite_flag])
+            parent_tree_item.appendRow([name, status, kind, usage, favorite_flag])
             tree_items[node] = name

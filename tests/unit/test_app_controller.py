@@ -141,6 +141,7 @@ class FakeModel:
         new_version_available=False,
         node_attrs=None,
         module_ref_link="",
+        cached_table_ids=None,
     ):
         """Initialize with canned values for each Model property/method the controller uses."""
         self.iod_list = iod_list if iod_list is not None else []
@@ -149,6 +150,7 @@ class FakeModel:
         self.new_version_available = new_version_available
         self._node_attrs = node_attrs or {}
         self._module_ref_link = module_ref_link
+        self._cached_table_ids = set(cached_table_ids or [])
 
     def get_node_public_attrs(self, table_id, relative_path):
         """Return the canned details dict for (table_id, relative_path), or None if unset."""
@@ -157,6 +159,10 @@ class FakeModel:
     def get_module_ref_link(self, ref_html):
         """Return the canned formatted reference link, ignoring the input."""
         return self._module_ref_link
+
+    def is_iod_model_cached(self, table_id):
+        """Return whether table_id is in the cached table_ids set."""
+        return table_id in self._cached_table_ids
 
 
 class FakeFavoritesManager:

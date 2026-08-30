@@ -284,6 +284,24 @@ class TestCacheDirHelpers:
         assert model._versioned_model_dir("2026c") == os.path.join(model.config.cache_dir, "2026c", "model")
 
 
+class TestIsIodModelCached:
+    """Tests for Model.is_iod_model_cached."""
+
+    def test_returns_true_when_cache_file_exists(self, model):
+        """A table_id with a cache file on disk at the expected path is reported as cached."""
+        cache_dir = model._model_cache_dir()
+        os.makedirs(cache_dir, exist_ok=True)
+        cache_path = model._iod_model_cache_path("table_A.2-1")
+        with open(cache_path, "w", encoding="utf-8") as f:
+            f.write("{}")
+
+        assert model.is_iod_model_cached("table_A.2-1") is True
+
+    def test_returns_false_when_cache_file_does_not_exist(self, model):
+        """A table_id with no cache file on disk is reported as not cached."""
+        assert model.is_iod_model_cached("table_A.2-1") is False
+
+
 class TestMoveFolderIfExists:
     """Tests for Model._move_folder_if_exists."""
 
