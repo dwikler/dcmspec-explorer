@@ -21,9 +21,10 @@ class MainWindow(QMainWindow):
 
     # Define column indices for the treeview
     COL_NAME = 0
-    COL_KIND = 1
-    COL_USAGE = 2
-    COL_FAVORITE = 3
+    COL_STATUS = 1
+    COL_KIND = 2
+    COL_USAGE = 3
+    COL_FAVORITE = 4
 
     # Define custom signals that will be emitted when UI events occur.
     window_shown = Signal()
@@ -74,6 +75,13 @@ class MainWindow(QMainWindow):
             }
         """)
 
+        # Give row cell content (e.g. the cache-status icon) a small left margin
+        self.ui.iodTreeView.setStyleSheet("""
+            QTreeView::item {
+                padding-left: 4px;
+            }
+        """)
+
         # Load details pane CSS from resources/styles
         css_path = os.path.join(os.path.dirname(__file__), "..", "resources", "styles", "details.css")
         try:
@@ -86,6 +94,10 @@ class MainWindow(QMainWindow):
         # Load application icons
         heart_icon_path = os.path.join(os.path.dirname(__file__), "..", "resources", "icons", "heart.svg")
         self.heart_icon = QIcon(heart_icon_path) if os.path.exists(heart_icon_path) else None
+        cached_icon_path = os.path.join(os.path.dirname(__file__), "..", "resources", "icons", "cached.svg")
+        self.cached_icon = QIcon(cached_icon_path) if os.path.exists(cached_icon_path) else None
+        uncached_icon_path = os.path.join(os.path.dirname(__file__), "..", "resources", "icons", "uncached.svg")
+        self.uncached_icon = QIcon(uncached_icon_path) if os.path.exists(uncached_icon_path) else None
 
         # Connect to UI widgets signals
         self.ui.iodTreeView.clicked.connect(self._on_treeview_item_clicked)
@@ -117,6 +129,14 @@ class MainWindow(QMainWindow):
     def get_heart_icon(self) -> Optional[QIcon]:
         """Return the QIcon for the favorites heart, or None if not available."""
         return self.heart_icon
+
+    def get_cached_icon(self) -> Optional[QIcon]:
+        """Return the QIcon shown for an IOD whose spec model is already cached, or None."""
+        return self.cached_icon
+
+    def get_uncached_icon(self) -> Optional[QIcon]:
+        """Return the QIcon shown for an IOD whose spec model isn't cached yet, or None."""
+        return self.uncached_icon
 
     def set_details_html(self, html_body: str) -> None:
         """Set the HTML content of the details pane, injecting the loaded CSS."""
@@ -197,6 +217,7 @@ class MainWindow(QMainWindow):
         self.ui.iodTreeView.setModel(tree_model)
         # Set default column widths
         self.ui.iodTreeView.setColumnWidth(self.COL_NAME, 400)
+        self.ui.iodTreeView.setColumnWidth(self.COL_STATUS, 26)
         self.ui.iodTreeView.setColumnWidth(self.COL_KIND, 100)
         self.ui.iodTreeView.setColumnWidth(self.COL_USAGE, 30)
         self.ui.iodTreeView.setColumnWidth(self.COL_FAVORITE, 20)

@@ -87,7 +87,10 @@ class AppController(QObject):
         self.favorites_manager = FavoritesManager(self.config, self.logger)
         # Initialize the treeview adapter with favorites manager
         self.treeview_adapter = IODTreeViewModelAdapter(
-            favorites_manager=self.favorites_manager, heart_icon=self.view.get_heart_icon()
+            favorites_manager=self.favorites_manager,
+            heart_icon=self.view.get_heart_icon(),
+            cached_icon=self.view.get_cached_icon(),
+            uncached_icon=self.view.get_uncached_icon(),
         )
         # Initialize the favorites view state from config
         self.show_favorites_only = parse_bool(self.config.get_param("show_favorites_on_start"))
@@ -490,7 +493,7 @@ class AppController(QObject):
             model = self.view.ui.iodTreeView.model()
             for table_id, iod_model in self.model.iod_specmodels.items():
                 if iod_model and hasattr(iod_model, "content") and iod_model.content:
-                    IODTreeViewModelAdapter.populate_iod_entry_children(model, table_id, iod_model.content)
+                    self.treeview_adapter.populate_iod_entry_children(model, table_id, iod_model.content)
 
         # Update the version label with the model's version
         if self.model.version:
@@ -528,7 +531,7 @@ class AppController(QObject):
         if iod_model and hasattr(iod_model, "content"):
             # Find the parent item in the current treeview model
             model = self.view.ui.iodTreeView.model()
-            success = IODTreeViewModelAdapter.populate_iod_entry_children(model, table_id, iod_model.content)
+            success = self.treeview_adapter.populate_iod_entry_children(model, table_id, iod_model.content)
             if not success:
                 self.view.show_error("The selected IOD is no longer visible. Please clear the filter and try again.")
 
