@@ -115,7 +115,7 @@ class Ui_MainWindow(object):
         self.iodTreeView.setObjectName(u"iodTreeView")
         self.iodTreeView.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.iodTreeView.setSortingEnabled(False)
-        self.iodTreeView.header().setProperty(u"showSortIndicator", True)
+        self.iodTreeView.header().setProperty(u"showSortIndicator", False)
 
         self.verticalLayout.addWidget(self.iodTreeView)
 

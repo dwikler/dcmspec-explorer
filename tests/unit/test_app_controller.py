@@ -660,16 +660,16 @@ class TestOnTreeviewHeaderClicked:
     """Tests for AppController._on_treeview_header_clicked."""
 
     def test_non_sortable_column_hides_indicator_and_leaves_sort_state_untouched(self, fake_logger):
-        """Clicking the Usage column (index 2) is a no-op besides hiding the sort indicator."""
+        """Clicking the Status column (index 1) is a no-op besides hiding the sort indicator."""
         view = FakeView()
         state = make_controller_state(
-            view=view, model=FakeModel(), logger=fake_logger, sort_column=1, sort_reverse=True
+            view=view, model=FakeModel(), logger=fake_logger, sort_column=2, sort_reverse=True
         )
 
-        state._on_treeview_header_clicked(2)
+        state._on_treeview_header_clicked(1)
 
         assert view.ui.iodTreeView.header().sort_indicator_shown_calls == [False]
-        assert state.sort_column == 1
+        assert state.sort_column == 2
         assert state.sort_reverse is True
         assert view.sort_indicator_calls == []
 
@@ -686,6 +686,20 @@ class TestOnTreeviewHeaderClicked:
         assert state.sort_reverse is True
         assert view.sort_indicator_calls[-1] == (0, True)
 
+    def test_clicking_descending_column_again_resets_to_unsorted(self, fake_logger):
+        """A third click on the same column (already descending) cycles back to unsorted."""
+        view = FakeView()
+        state = make_controller_state(
+            view=view, model=FakeModel(), logger=fake_logger, sort_column=0, sort_reverse=True
+        )
+
+        state._on_treeview_header_clicked(0)
+
+        assert state.sort_column is None
+        assert state.sort_reverse is False
+        assert view.ui.iodTreeView.header().sort_indicator_shown_calls == [False]
+        assert view.sort_indicator_calls == []
+
     def test_clicking_new_sortable_column_sets_it_ascending(self, fake_logger):
         """Clicking a different sortable column switches to it, ascending."""
         view = FakeView()
@@ -693,9 +707,9 @@ class TestOnTreeviewHeaderClicked:
             view=view, model=FakeModel(), logger=fake_logger, sort_column=0, sort_reverse=True
         )
 
-        state._on_treeview_header_clicked(1)
+        state._on_treeview_header_clicked(2)
 
-        assert state.sort_column == 1
+        assert state.sort_column == 2
         assert state.sort_reverse is False
 
 
