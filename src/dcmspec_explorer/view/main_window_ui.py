@@ -3,7 +3,7 @@
 ################################################################################
 ## Form generated from reading UI file 'main_window.ui'
 ##
-## Created by: Qt User Interface Compiler version 6.9.1
+## Created by: Qt User Interface Compiler version 6.11.2
 ##
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
@@ -11,15 +11,16 @@
 from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
     QMetaObject, QObject, QPoint, QRect,
     QSize, QTime, QUrl, Qt)
-from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
-    QFont, QFontDatabase, QGradient, QIcon,
-    QImage, QKeySequence, QLinearGradient, QPainter,
-    QPalette, QPixmap, QRadialGradient, QTransform)
+from PySide6.QtGui import (QAction, QBrush, QColor, QConicalGradient,
+    QCursor, QFont, QFontDatabase, QGradient,
+    QIcon, QImage, QKeySequence, QLinearGradient,
+    QPainter, QPalette, QPixmap, QRadialGradient,
+    QTransform)
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QHBoxLayout, QHeaderView,
-    QLabel, QLineEdit, QMainWindow, QMenuBar,
-    QPushButton, QSizePolicy, QSpacerItem, QSplitter,
-    QStatusBar, QTextBrowser, QTreeView, QVBoxLayout,
-    QWidget)
+    QLabel, QLineEdit, QMainWindow, QMenu,
+    QMenuBar, QPushButton, QSizePolicy, QSpacerItem,
+    QSplitter, QStatusBar, QTextBrowser, QTreeView,
+    QVBoxLayout, QWidget)
 
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
@@ -32,6 +33,14 @@ class Ui_MainWindow(object):
         sizePolicy.setHeightForWidth(MainWindow.sizePolicy().hasHeightForWidth())
         MainWindow.setSizePolicy(sizePolicy)
         MainWindow.setMaximumSize(QSize(16777215, 16777215))
+        self.actionExportCsv = QAction(MainWindow)
+        self.actionExportCsv.setObjectName(u"actionExportCsv")
+        self.actionExportXlsx = QAction(MainWindow)
+        self.actionExportXlsx.setObjectName(u"actionExportXlsx")
+        self.actionExit = QAction(MainWindow)
+        self.actionExit.setObjectName(u"actionExit")
+        self.actionToggleFavorite = QAction(MainWindow)
+        self.actionToggleFavorite.setObjectName(u"actionToggleFavorite")
         self.centralwidget = QWidget(MainWindow)
         self.centralwidget.setObjectName(u"centralwidget")
         self.verticalLayout_3 = QVBoxLayout(self.centralwidget)
@@ -71,10 +80,10 @@ class Ui_MainWindow(object):
 
         self.horizontalLayout.addWidget(self.versionLabel)
 
-        self.reloadPushButton = QPushButton(self.controlArea)
-        self.reloadPushButton.setObjectName(u"reloadPushButton")
+        self.checkForUpdatesPushButton = QPushButton(self.controlArea)
+        self.checkForUpdatesPushButton.setObjectName(u"checkForUpdatesPushButton")
 
-        self.horizontalLayout.addWidget(self.reloadPushButton)
+        self.horizontalLayout.addWidget(self.checkForUpdatesPushButton)
 
 
         self.verticalLayout_3.addWidget(self.controlArea)
@@ -140,10 +149,22 @@ class Ui_MainWindow(object):
         self.menubar = QMenuBar(MainWindow)
         self.menubar.setObjectName(u"menubar")
         self.menubar.setGeometry(QRect(0, 0, 1400, 43))
+        self.menuFile = QMenu(self.menubar)
+        self.menuFile.setObjectName(u"menuFile")
+        self.menuExport = QMenu(self.menuFile)
+        self.menuExport.setObjectName(u"menuExport")
         MainWindow.setMenuBar(self.menubar)
         self.statusbar = QStatusBar(MainWindow)
         self.statusbar.setObjectName(u"statusbar")
         MainWindow.setStatusBar(self.statusbar)
+
+        self.menubar.addAction(self.menuFile.menuAction())
+        self.menuFile.addAction(self.menuExport.menuAction())
+        self.menuFile.addAction(self.actionToggleFavorite)
+        self.menuFile.addSeparator()
+        self.menuFile.addAction(self.actionExit)
+        self.menuExport.addAction(self.actionExportCsv)
+        self.menuExport.addAction(self.actionExportXlsx)
 
         self.retranslateUi(MainWindow)
 
@@ -152,11 +173,17 @@ class Ui_MainWindow(object):
 
     def retranslateUi(self, MainWindow):
         MainWindow.setWindowTitle(QCoreApplication.translate("MainWindow", u"DCMspec Explorer", None))
+        self.actionExportCsv.setText(QCoreApplication.translate("MainWindow", u"CSV...", None))
+        self.actionExportXlsx.setText(QCoreApplication.translate("MainWindow", u"Excel...", None))
+        self.actionExit.setText(QCoreApplication.translate("MainWindow", u"Exit", None))
+        self.actionToggleFavorite.setText(QCoreApplication.translate("MainWindow", u"Add to Favorites", None))
         self.searchLineEdit.setPlaceholderText(QCoreApplication.translate("MainWindow", u"Search Name or Kind (case-sensitive)...", None))
         self.toggleFavoritesPushButton.setText(QCoreApplication.translate("MainWindow", u"All/Favorites", None))
         self.versionLabel.setText(QCoreApplication.translate("MainWindow", u"Version", None))
-        self.reloadPushButton.setText(QCoreApplication.translate("MainWindow", u"Reload", None))
+        self.checkForUpdatesPushButton.setText(QCoreApplication.translate("MainWindow", u"Check for Updates", None))
         self.iodLabel.setText(QCoreApplication.translate("MainWindow", u"IOD List", None))
         self.detailsLabel.setText(QCoreApplication.translate("MainWindow", u"Details", None))
+        self.menuFile.setTitle(QCoreApplication.translate("MainWindow", u"File", None))
+        self.menuExport.setTitle(QCoreApplication.translate("MainWindow", u"Export", None))
     # retranslateUi
 

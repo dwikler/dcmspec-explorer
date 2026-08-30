@@ -12,7 +12,7 @@ make_controller_state below): rather than constructing a real AppController (whi
 a real QApplication, Model, MainWindow, and live Qt signal wiring), each test calls one
 AppController method directly against a plain types.SimpleNamespace standing in for `self`. Real
 AppController instance methods are bound onto that namespace via functools.partial, so internal
-`self.<method>(...)` calls made by the handler under test (e.g. _on_reload_clicked calling
+`self.<method>(...)` calls made by the handler under test (e.g. _on_check_for_updates_clicked calling
 self._connect_iodlist_signals) resolve to the real implementation, operating on fake view/model/
 service collaborators. This exercises real, interconnected controller logic and lets tests assert
 on its effects (what the fake view/model/service recorded) rather than on implementation details.
@@ -46,16 +46,21 @@ from dcmspec_explorer.qt.qt_roles import TABLE_ID_ROLE, NODE_PATH_ROLE
 _BOUND_METHOD_NAMES = [
     "initialize_treeview",
     "_on_search_text_changed",
-    "_on_toggle_favorites_clicked",
+    "_on_toggle_favorite_display_clicked",
     "_on_treeview_item_clicked",
     "get_selected_item_details",
     "_on_treeview_right_click",
+    "_favorite_action_label",
+    "_is_iod_loaded",
+    "_export_selected_iod",
+    "_on_toggle_favorite_state_action_triggered",
+    "_on_file_menu_about_to_show",
     "_export_iod_model",
     "_connect_export_signals",
     "_handle_export_loaded",
     "_handle_export_error",
     "_report_error",
-    "_on_reload_clicked",
+    "_on_check_for_updates_clicked",
     "_toggle_favorite",
     "_safe_disconnect",
     "_connect_signals",
@@ -355,12 +360,13 @@ class FakeUi:
 class FakeView:
     """Fake View mirroring MainWindow's documented setter contract, plus the `.ui` reach-ins."""
 
-    def __init__(self, ui=None, save_file_return=None):
+    def __init__(self, ui=None, save_file_return=None, selected_iod=None):
         """Initialize the `.ui` namespace and empty call-recording lists for every setter.
 
         Args:
             ui: Optional FakeUi override.
             save_file_return: Canned return value for prompt_save_file (None simulates Cancel).
+            selected_iod: Canned (table_id, name) tuple returned by get_selected_iod, or None.
 
         """
         self.ui = ui if ui is not None else FakeUi()
@@ -376,6 +382,9 @@ class FakeView:
         self.url_warning_calls = []
         self.prompt_save_file_calls = []
         self._save_file_return = save_file_return
+        self._selected_iod = selected_iod
+        self.export_menu_enabled_calls = []
+        self.favorite_action_calls = []
 
     def set_details_html(self, html_body):
         """Record the call."""
@@ -422,6 +431,18 @@ class FakeView:
     def show_url_link_warning_dialog(self, url_str):
         """Record the call."""
         self.url_warning_calls.append(url_str)
+
+    def get_selected_iod(self):
+        """Return the canned (table_id, name) selection configured at construction time."""
+        return self._selected_iod
+
+    def set_export_menu_enabled(self, enabled, disabled_tooltip=""):
+        """Record the call."""
+        self.export_menu_enabled_calls.append((enabled, disabled_tooltip))
+
+    def set_favorite_action(self, enabled, is_favorite):
+        """Record the call."""
+        self.favorite_action_calls.append((enabled, is_favorite))
 
 
 class FakeQAction:
@@ -576,15 +597,15 @@ class TestInitializeTreeview:
         assert view.status_bar_calls[-1] == "Loading IOD modules..."
 
 
-class TestOnReloadClicked:
-    """Tests for AppController._on_reload_clicked."""
+class TestOnCheckForUpdatesClicked:
+    """Tests for AppController._on_check_for_updates_clicked."""
 
     def test_starts_iodlist_worker_with_force_download_and_updates_status_bar(self, fake_logger):
-        """The Reload button forces a fresh download and shows a downloading message."""
+        """The Check for Updates button forces a fresh download and shows a downloading message."""
         view = FakeView()
         state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
 
-        state._on_reload_clicked()
+        state._on_check_for_updates_clicked()
 
         assert state.service.start_iodlist_worker_calls == [True]
         assert view.status_bar_calls[-1] == "Downloading latest IOD modules from web..."
@@ -610,7 +631,7 @@ class TestOnSearchTextChanged:
 
 
 class TestOnToggleFavoritesClicked:
-    """Tests for AppController._on_toggle_favorites_clicked."""
+    """Tests for AppController._on_toggle_favorite_display_clicked."""
 
     def test_toggles_flag_updates_button_label_and_delegates(self, fake_logger):
         """Each click flips show_favorites_only, relabels the button, and rebuilds the treeview."""
@@ -619,12 +640,12 @@ class TestOnToggleFavoritesClicked:
             view=view, model=FakeModel(), logger=fake_logger, favorites_manager=FakeFavoritesManager()
         )
 
-        state._on_toggle_favorites_clicked()
+        state._on_toggle_favorite_display_clicked()
         assert state.show_favorites_only is True
         assert view.favorites_button_label_calls == [True]
         assert view.update_treeview_calls
 
-        state._on_toggle_favorites_clicked()
+        state._on_toggle_favorite_display_clicked()
         assert state.show_favorites_only is False
         assert view.favorites_button_label_calls == [True, False]
 
@@ -1130,6 +1151,130 @@ class TestOnTreeviewRightClick:
         export_menu.actions[1].triggered.connected[0]()
 
         assert calls == [("table_A.1-1", "Alpha", "xlsx")]
+
+
+class TestExportSelectedIod:
+    """Tests for AppController._export_selected_iod (File > Export menu actions)."""
+
+    def test_no_selection_does_nothing(self, fake_logger):
+        """With no IOD selected, no export is started."""
+        calls = []
+        state = make_controller_state(
+            view=FakeView(selected_iod=None),
+            model=FakeModel(),
+            logger=fake_logger,
+            _export_iod_model=lambda table_id, iod_name, fmt: calls.append((table_id, iod_name, fmt)),
+        )
+
+        state._export_selected_iod("csv")
+
+        assert calls == []
+
+    def test_exports_the_selected_iod_in_the_given_format(self, fake_logger):
+        """With an IOD selected, _export_iod_model is called with its table_id, name, and the given format."""
+        calls = []
+        state = make_controller_state(
+            view=FakeView(selected_iod=("table_A.1-1", "Alpha")),
+            model=FakeModel(),
+            logger=fake_logger,
+            _export_iod_model=lambda table_id, iod_name, fmt: calls.append((table_id, iod_name, fmt)),
+        )
+
+        state._export_selected_iod("xlsx")
+
+        assert calls == [("table_A.1-1", "Alpha", "xlsx")]
+
+
+class TestOnToggleFavoriteActionTriggered:
+    """Tests for AppController._on_toggle_favorite_state_action_triggered (File menu action)."""
+
+    def test_no_selection_does_nothing(self, fake_logger):
+        """With no IOD selected, no favorite is toggled."""
+        favorites = FakeFavoritesManager()
+        state = make_controller_state(
+            view=FakeView(selected_iod=None), model=FakeModel(), logger=fake_logger, favorites_manager=favorites
+        )
+
+        state._on_toggle_favorite_state_action_triggered()
+
+        assert favorites.add_calls == []
+
+    def test_toggles_favorite_for_the_selected_iod(self, fake_logger):
+        """With an IOD selected, its favorite status is toggled."""
+        favorites = FakeFavoritesManager()
+        state = make_controller_state(
+            view=FakeView(selected_iod=("table_A.1-1", "Alpha")),
+            model=FakeModel(),
+            logger=fake_logger,
+            favorites_manager=favorites,
+        )
+
+        state._on_toggle_favorite_state_action_triggered()
+
+        assert favorites.add_calls == ["table_A.1-1"]
+
+
+class TestOnFileMenuAboutToShow:
+    """Tests for AppController._on_file_menu_about_to_show (File menu Export/favorite enabled state)."""
+
+    def test_no_selection_disables_export_and_favorite(self, fake_logger):
+        """With no IOD selected, Export is disabled with a tooltip and the favorite action is disabled."""
+        view = FakeView(selected_iod=None)
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+
+        state._on_file_menu_about_to_show()
+
+        assert view.export_menu_enabled_calls == [(False, "Select an IOD first")]
+        assert view.favorite_action_calls == [(False, False)]
+
+    def test_selected_but_not_loaded_disables_export_with_tooltip(self, fake_logger):
+        """A selected but not-yet-loaded IOD disables Export with a tooltip to select it first."""
+        view = FakeView(selected_iod=("table_A.1-1", "Alpha"))
+        state = make_controller_state(
+            view=view,
+            model=FakeModel(iod_specmodels={}),
+            logger=fake_logger,
+            favorites_manager=FakeFavoritesManager(),
+        )
+
+        state._on_file_menu_about_to_show()
+
+        assert view.export_menu_enabled_calls == [(False, "Select this IOD first to load it")]
+
+    def test_selected_and_loaded_enables_export(self, fake_logger):
+        """A selected, already-loaded IOD enables Export with no tooltip."""
+        view = FakeView(selected_iod=("table_A.1-1", "Alpha"))
+        state = make_controller_state(
+            view=view,
+            model=FakeModel(iod_specmodels={"table_A.1-1": "loaded_model"}),
+            logger=fake_logger,
+            favorites_manager=FakeFavoritesManager(),
+        )
+
+        state._on_file_menu_about_to_show()
+
+        assert view.export_menu_enabled_calls == [(True, "")]
+
+    def test_selected_non_favorite_enables_action_as_add(self, fake_logger):
+        """A selected, non-favorited IOD enables the favorite action with is_favorite=False."""
+        view = FakeView(selected_iod=("table_A.1-1", "Alpha"))
+        state = make_controller_state(
+            view=view, model=FakeModel(), logger=fake_logger, favorites_manager=FakeFavoritesManager()
+        )
+
+        state._on_file_menu_about_to_show()
+
+        assert view.favorite_action_calls == [(True, False)]
+
+    def test_selected_favorite_enables_action_as_remove(self, fake_logger):
+        """A selected, already-favorited IOD enables the favorite action with is_favorite=True."""
+        view = FakeView(selected_iod=("table_A.1-1", "Alpha"))
+        favorites = FakeFavoritesManager(favorite_table_ids={"table_A.1-1"})
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger, favorites_manager=favorites)
+
+        state._on_file_menu_about_to_show()
+
+        assert view.favorite_action_calls == [(True, True)]
 
 
 class TestNormalizeExportFilename:

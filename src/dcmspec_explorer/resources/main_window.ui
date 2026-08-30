@@ -92,9 +92,9 @@
         </widget>
        </item>
        <item>
-        <widget class="QPushButton" name="reloadPushButton">
+        <widget class="QPushButton" name="checkForUpdatesPushButton">
          <property name="text">
-          <string>Reload</string>
+          <string>Check for Updates</string>
          </property>
         </widget>
        </item>
@@ -188,8 +188,45 @@
      <height>43</height>
     </rect>
    </property>
+   <widget class="QMenu" name="menuFile">
+    <property name="title">
+     <string>File</string>
+    </property>
+    <widget class="QMenu" name="menuExport">
+     <property name="title">
+      <string>Export</string>
+     </property>
+     <addaction name="actionExportCsv"/>
+     <addaction name="actionExportXlsx"/>
+    </widget>
+    <addaction name="menuExport"/>
+    <addaction name="actionToggleFavorite"/>
+    <addaction name="separator"/>
+    <addaction name="actionExit"/>
+   </widget>
+   <addaction name="menuFile"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
+  <action name="actionExportCsv">
+   <property name="text">
+    <string>CSV...</string>
+   </property>
+  </action>
+  <action name="actionExportXlsx">
+   <property name="text">
+    <string>Excel...</string>
+   </property>
+  </action>
+  <action name="actionExit">
+   <property name="text">
+    <string>Exit</string>
+   </property>
+  </action>
+  <action name="actionToggleFavorite">
+   <property name="text">
+    <string>Add to Favorites</string>
+   </property>
+  </action>
  </widget>
  <resources/>
  <connections/>

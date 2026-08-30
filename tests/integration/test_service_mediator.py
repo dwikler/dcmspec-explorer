@@ -145,7 +145,7 @@ class TestIODModelLoaderServiceMediatorHappyPath:
 class TestOverlappingWorkerStartsHazard:
     """Regression tests characterizing the lack of any single-worker-in-flight guard.
 
-    Both `initialize_treeview` and `_on_reload_clicked` call `start_iodlist_worker`
+    Both `initialize_treeview` and `_on_check_for_updates_clicked` call `start_iodlist_worker`
     unconditionally, with no check for a worker already in flight on the same mediator.
     These tests pin down the two concrete consequences of that missing guard.
     """
