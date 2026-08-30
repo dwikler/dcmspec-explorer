@@ -214,13 +214,24 @@ class MainWindow(QMainWindow):
 
     def update_treeview(self, tree_model: QStandardItemModel) -> None:
         """Update the treeview with a new model."""
+        header = self.ui.iodTreeView.header()
+        # The treeview is rebuilt with a new model on every filter/sort/reload, which would
+        # otherwise discard any column widths the user resized manually, so only apply the
+        # defaults on first load and preserve the current widths on subsequent rebuilds.
+        is_first_load = self.ui.iodTreeView.model() is None
+        column_widths = [header.sectionSize(i) for i in range(header.count())]
+
         self.ui.iodTreeView.setModel(tree_model)
-        # Set default column widths
-        self.ui.iodTreeView.setColumnWidth(self.COL_NAME, 400)
-        self.ui.iodTreeView.setColumnWidth(self.COL_STATUS, 26)
-        self.ui.iodTreeView.setColumnWidth(self.COL_KIND, 100)
-        self.ui.iodTreeView.setColumnWidth(self.COL_USAGE, 30)
-        self.ui.iodTreeView.setColumnWidth(self.COL_FAVORITE, 20)
+
+        if is_first_load:
+            self.ui.iodTreeView.setColumnWidth(self.COL_NAME, 400)
+            self.ui.iodTreeView.setColumnWidth(self.COL_STATUS, 26)
+            self.ui.iodTreeView.setColumnWidth(self.COL_KIND, 100)
+            self.ui.iodTreeView.setColumnWidth(self.COL_USAGE, 30)
+            self.ui.iodTreeView.setColumnWidth(self.COL_FAVORITE, 20)
+        else:
+            for column, width in enumerate(column_widths):
+                self.ui.iodTreeView.setColumnWidth(column, width)
 
         # Set an item delegate for the favorite column to display the favorite icon
         self.ui.iodTreeView.setItemDelegateForColumn(

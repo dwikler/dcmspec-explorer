@@ -602,20 +602,27 @@ class AppController(QObject):
 
     def _on_treeview_header_clicked(self, logical_index: int) -> None:
         """Handle clicks on the treeview column headers for sorting."""
-        # Only allow sorting on Name (0) and Kind (1)
-        if logical_index not in (0, 1):
+        # Only allow sorting on Name and Kind
+        if logical_index not in (MainWindow.COL_NAME, MainWindow.COL_KIND):
             self.logger.info("Sorting is only supported on Name and Kind columns.")
             # Hide the sort indicator if user clicks on a non-sortable column
             self.view.ui.iodTreeView.header().setSortIndicatorShown(False)
             return
 
-        if self.sort_column == logical_index:
-            self.sort_reverse = not self.sort_reverse  # descending if True, ascending if False
-        else:
+        if self.sort_column != logical_index:
             self.sort_column = logical_index
+            self.sort_reverse = False
+        elif not self.sort_reverse:
+            self.sort_reverse = True  # ascending -> descending
+        else:
+            # Descending -> unsorted: cycle back to the natural (unsorted) order
+            self.sort_column = None
             self.sort_reverse = False
 
         # Update the sort indicator in the view
-        self.view.update_treeview_sort_indicator(self.sort_column, self.sort_reverse)
+        if self.sort_column is None:
+            self.view.ui.iodTreeView.header().setSortIndicatorShown(False)
+        else:
+            self.view.update_treeview_sort_indicator(self.sort_column, self.sort_reverse)
 
         self.apply_filter_and_sort()
