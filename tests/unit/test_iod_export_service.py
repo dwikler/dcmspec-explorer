@@ -5,7 +5,7 @@ import queue
 import pytest
 from anytree import Node
 
-from dcmspec_explorer.services.iod_export_service import IODExportWorker
+from dcmspec_explorer.services.iod_export_service import XLSX_COLUMN_WIDTHS_BY_ATTR, IODExportWorker
 
 
 def _chained_runtime_error():
@@ -16,15 +16,31 @@ def _chained_runtime_error():
         return error
 
 
+class FakeMetadata:
+    """Fake spec model metadata exposing only the .column_to_attr attribute the worker needs."""
+
+    def __init__(self, column_to_attr):
+        """Initialize with the given column-index-to-attribute-name mapping."""
+        self.column_to_attr = column_to_attr
+
+
 class FakeIodModel:
-    """Fake loaded IOD spec model exposing only the .content attribute the worker needs."""
+    """Fake loaded IOD spec model exposing only the .content/.metadata attributes the worker needs."""
 
-    def __init__(self, content):
-        """Initialize with the given anytree content root."""
+    def __init__(self, content, column_to_attr):
+        """Initialize with the given anytree content root and column_to_attr mapping."""
         self.content = content
+        self.metadata = FakeMetadata(column_to_attr)
 
 
-def _make_iod_model(elem_description="<p>Patient's full name.</p>"):
+# Matches the Composite/Normalized IOD column_to_attr shapes built by Model.load_iod_specmodel:
+# Normalized IODs have no "Type" column, so elem_type is absent and the remaining columns are
+# reindexed (see model.py's `skip_columns` for elem_type on normalized IODs).
+COMPOSITE_COLUMN_TO_ATTR = {0: "elem_name", 1: "elem_tag", 2: "elem_type", 3: "elem_description"}
+NORMALIZED_COLUMN_TO_ATTR = {0: "elem_name", 1: "elem_tag", 2: "elem_description"}
+
+
+def _make_iod_model(elem_description="<p>Patient's full name.</p>", column_to_attr=None):
     """Build a minimal fake IOD model: one module with one attribute carrying an HTML description."""
     content = Node("content")
     module = Node("PatientModule", parent=content)
@@ -32,7 +48,7 @@ def _make_iod_model(elem_description="<p>Patient's full name.</p>"):
     attr_node = Node("attr", parent=module)
     attr_node.elem_name = "Patient's Name"
     attr_node.elem_description = elem_description
-    return FakeIodModel(content)
+    return FakeIodModel(content, column_to_attr or COMPOSITE_COLUMN_TO_ATTR)
 
 
 def _find_attr_node(content):
@@ -61,9 +77,10 @@ class FakePrinter:
         if self.error is not None:
             raise self.error
 
-    def print_xlsx(self):
-        """Record the call, or raise the canned error."""
+    def print_xlsx(self, column_widths=None):
+        """Record the call and the column_widths it was given, or raise the canned error."""
         self.print_xlsx_calls += 1
+        self.xlsx_column_widths = column_widths
         if self.error is not None:
             raise self.error
 
@@ -127,6 +144,34 @@ class TestIODExportWorker:
         printer = FakePrinter.instances[0]
         assert printer.print_xlsx_calls == 1
         assert printer.print_csv_calls == 0
+        assert printer.xlsx_column_widths == [
+            XLSX_COLUMN_WIDTHS_BY_ATTR["elem_name"],
+            XLSX_COLUMN_WIDTHS_BY_ATTR["elem_tag"],
+            XLSX_COLUMN_WIDTHS_BY_ATTR["elem_type"],
+            XLSX_COLUMN_WIDTHS_BY_ATTR["elem_description"],
+        ]
+
+    def test_xlsx_export_normalized_iod_omits_type_column_width(self, fake_logger, monkeypatch):
+        """A Normalized IOD's column_to_attr has no elem_type; its width isn't misapplied to elem_description."""
+        _patch_printer(monkeypatch)
+        event_queue = queue.Queue()
+        worker = IODExportWorker(
+            iod_model=_make_iod_model(column_to_attr=NORMALIZED_COLUMN_TO_ATTR),
+            fmt="xlsx",
+            output_path="/tmp/out.xlsx",
+            logger=fake_logger,
+            event_queue=event_queue,
+        )
+
+        worker.run()
+
+        assert event_queue.get_nowait() == ("loaded", "/tmp/out.xlsx")
+        printer = FakePrinter.instances[0]
+        assert printer.xlsx_column_widths == [
+            XLSX_COLUMN_WIDTHS_BY_ATTR["elem_name"],
+            XLSX_COLUMN_WIDTHS_BY_ATTR["elem_tag"],
+            XLSX_COLUMN_WIDTHS_BY_ATTR["elem_description"],
+        ]
 
     def test_unsupported_format_puts_error_event(self, fake_logger, monkeypatch):
         """An unrecognized fmt puts an error event instead of calling any print method."""
@@ -217,7 +262,7 @@ class TestToPlainTextModel:
         content = Node("content")
         module = Node("PatientModule", parent=content)
         module.module = "Patient"
-        iod_model = FakeIodModel(content)
+        iod_model = FakeIodModel(content, COMPOSITE_COLUMN_TO_ATTR)
 
         export_model = IODExportWorker._to_plain_text_model(iod_model)  # must not raise
 

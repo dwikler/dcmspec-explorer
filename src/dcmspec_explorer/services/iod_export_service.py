@@ -23,6 +23,19 @@ _HTML_TO_TEXT_CONFIG = ParserConfig(css=CSS_PROFILES["strict"])
 # need plain text instead, so IODExportWorker converts these on an export-only copy of the model.
 HTML_NODE_ATTRS = ("elem_description",)
 
+# Excel column widths by node attribute rather than position: Normalized IODs' module attribute
+# tables have no Type column (see model.py's `skip_columns` for elem_type), so the model's
+# metadata.column_to_attr for those IODs omits "elem_type" and is one column shorter than for
+# Composite IODs. Keying widths by attribute name keeps each column its intended width regardless
+# of which columns are actually present.
+XLSX_COLUMN_WIDTHS_BY_ATTR = {
+    "elem_name": 25,
+    "elem_tag": 12,
+    "elem_type": 8,
+    "elem_description": 35,
+}
+XLSX_DEFAULT_COLUMN_WIDTH = 20
+
 
 class IODExportWorker:
     """Export a loaded IOD spec model to CSV or Excel in a background thread."""
@@ -55,13 +68,22 @@ class IODExportWorker:
             if self.fmt == "csv":
                 printer.print_csv()
             elif self.fmt == "xlsx":
-                printer.print_xlsx()
+                column_widths = self._xlsx_column_widths(export_model)
+                printer.print_xlsx(column_widths=column_widths)
             else:
                 raise ValueError(f"Unsupported export format: {self.fmt}")
             self.event_queue.put(("loaded", self.output_path))
         except Exception as e:
             self.logger.exception(f"Failed to export IOD model to {self.output_path}")
             self.event_queue.put(("error", str(e)))
+
+    @staticmethod
+    def _xlsx_column_widths(export_model: Any) -> list[int]:
+        """Return Excel column widths in the model's actual column order."""
+        column_to_attr = export_model.metadata.column_to_attr
+        return [
+            XLSX_COLUMN_WIDTHS_BY_ATTR.get(column_to_attr[i], XLSX_DEFAULT_COLUMN_WIDTH) for i in sorted(column_to_attr)
+        ]
 
     @staticmethod
     def _to_plain_text_model(iod_model: Any) -> Any:
