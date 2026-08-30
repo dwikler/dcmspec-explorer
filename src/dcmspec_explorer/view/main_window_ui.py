@@ -103,7 +103,7 @@ class Ui_MainWindow(object):
         sizePolicy3.setVerticalStretch(0)
         sizePolicy3.setHeightForWidth(self.iodlistarea.sizePolicy().hasHeightForWidth())
         self.iodlistarea.setSizePolicy(sizePolicy3)
-        self.iodlistarea.setMinimumSize(QSize(600, 0))
+        self.iodlistarea.setMinimumSize(QSize(620, 0))
         self.verticalLayout = QVBoxLayout(self.iodlistarea)
         self.verticalLayout.setObjectName(u"verticalLayout")
         self.iodLabel = QLabel(self.iodlistarea)
