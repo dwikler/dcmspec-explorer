@@ -1174,7 +1174,7 @@ class TestExportSelectedIod:
 
         state._export_selected_iod("csv")
 
-        assert calls == []
+        assert not calls
 
     def test_exports_the_selected_iod_in_the_given_format(self, fake_logger):
         """With an IOD selected, _export_iod_model is called with its table_id, name, and the given format."""
