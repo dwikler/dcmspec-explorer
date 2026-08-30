@@ -54,6 +54,7 @@ _BOUND_METHOD_NAMES = [
     "_connect_export_signals",
     "_handle_export_loaded",
     "_handle_export_error",
+    "_report_error",
     "_on_reload_clicked",
     "_toggle_favorite",
     "_safe_disconnect",

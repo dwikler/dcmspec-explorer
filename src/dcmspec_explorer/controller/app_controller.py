@@ -266,9 +266,13 @@ class AppController(QObject):
 
     def _handle_export_error(self, sender: object, message: str) -> None:
         """Log the error and show it to the user when an export fails."""
+        self._report_error(sender, message, status_bar_message="Error exporting IOD.")
+
+    def _report_error(self, sender: object, message: str, status_bar_message: str) -> None:
+        """Log an error received via an error signal, then show it to the user and on the status bar."""
         self.logger.error(f"Error signal received from {sender}: {message}")
         self.view.show_error(message)
-        self.view.update_status_bar(message="Error exporting IOD.")
+        self.view.update_status_bar(message=status_bar_message)
 
     def _on_reload_clicked(self):
         """Handle Reload button click: reload IOD list from the web."""
@@ -466,9 +470,7 @@ class AppController(QObject):
             self.view.update_status_bar(message=f"Listed {len(iod_entry_list)} IODs.")
 
     def _handle_iodlist_error(self, sender: object, message: str) -> None:
-        self.logger.error(f"Error signal received from {sender}: {message}")
-        self.view.show_error(message)
-        self.view.update_status_bar(message="Error loading IOD modules.")
+        self._report_error(sender, message, status_bar_message="Error loading IOD modules.")
 
     def _handle_iodmodel_progress(self, sender: object, progress: Progress) -> None:
         status = progress.status
