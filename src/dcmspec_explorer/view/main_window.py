@@ -175,6 +175,10 @@ class MainWindow(QMainWindow):
         self.ui.explanationTextBrowser.setHtml("")
         self.set_explanation_expanded(False)
 
+    def is_explanation_expanded(self) -> bool:
+        """Return whether the explanatory section drawer's content is currently expanded."""
+        return self.ui.explanationTextBrowser.isVisible()
+
     def set_explanation_expanded(self, expanded: bool) -> None:
         """Expand or collapse the explanatory section drawer, updating the toggle button's indicator."""
         self.ui.explanationTextBrowser.setVisible(expanded)

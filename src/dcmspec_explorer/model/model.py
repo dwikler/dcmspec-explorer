@@ -16,6 +16,7 @@ from dcmspec.xhtml_doc_handler import XHTMLDocHandler
 from dcmspec.dom_table_spec_parser import DOMTableSpecParser
 from dcmspec.dom_section_spec_parser import DOMSectionSpecParser
 from dcmspec.iod_spec_builder import IODSpecBuilder
+from dcmspec.module_spec_builder import ModuleSpecBuilder
 from dcmspec.section_image_resolver import SectionImageResolver
 from dcmspec.section_registry import SectionRegistry
 from dcmspec.spec_factory import SpecFactory
@@ -254,10 +255,32 @@ class Model:
             logger=logger,
         )
 
+        # A forced reload needs a ModuleSpecBuilder to bypass a stale per-module JSON cache: without
+        # one, IODSpecBuilder loads an already-existing module cache file as-is, ignoring both
+        # force_download and whether it predates ref_columns -- ModuleSpecBuilder instead routes
+        # through SpecFactory.build_model, whose own cache check detects that mismatch and reparses.
+        # This also eagerly resolves that module's sections, an acceptable cost for this explicit,
+        # user-initiated reload (normal, lazy loads never do this).
+        module_builder = None
+        if force_rebuild:
+            section_factory = SpecFactory(
+                table_parser=DOMSectionSpecParser(logger=logger),
+                config=self.config,
+                logger=logger,
+            )
+            module_builder = ModuleSpecBuilder(
+                module_factory=module_factory,
+                section_factory=section_factory,
+                section_registry=self._section_specmodels,
+                ref_columns=[3],
+                logger=logger,
+            )
+
         # Create the builder
         builder = IODSpecBuilder(
             iod_factory=iod_factory,
             module_factory=module_factory,
+            module_builder=module_builder,
             logger=logger,
         )
 

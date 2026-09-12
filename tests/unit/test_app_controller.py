@@ -66,6 +66,7 @@ _BOUND_METHOD_NAMES = [
     "_connect_signals",
     "_connect_iodlist_signals",
     "_handle_iod_item_clicked",
+    "_start_iod_model_load",
     "_handle_module_item_clicked",
     "_handle_attribute_item_clicked",
     "_handle_iodlist_progress",
@@ -75,6 +76,14 @@ _BOUND_METHOD_NAMES = [
     "_handle_iodmodel_loaded",
     "_handle_iodmodel_error",
     "_on_details_link_clicked",
+    "_on_explanation_link_clicked",
+    "_on_explanation_toggle_clicked",
+    "_on_section_link_clicked",
+    "_handle_section_loaded",
+    "_handle_section_error",
+    "_show_section_unavailable",
+    "_on_reload_iod_link_clicked",
+    "_refresh_selected_attribute_after_load",
     "apply_filter_and_sort",
     "_on_treeview_header_clicked",
 ]
@@ -90,12 +99,19 @@ def make_controller_state(view, model, logger, favorites_manager=None, **overrid
         service=FakeMediator(),
         iod_model_service=FakeMediator(),
         export_service=FakeMediator(),
+        section_service=FakeMediator(),
         logger=logger,
         sort_column=None,
         sort_reverse=False,
         show_favorites_only=False,
         progress_dialog=None,
+        _current_table_id=None,
+        _current_relative_path=None,
+        _current_section_refs=[],
+        _explanation_loaded_section_id=None,
+        _explanation_has_content=False,
         _normalize_export_filename=AppController._normalize_export_filename,
+        _relative_path_for_item=AppController._relative_path_for_item,
     )
     for name in _BOUND_METHOD_NAMES:
         setattr(fake_self, name, functools.partial(getattr(AppController, name), fake_self))
@@ -225,7 +241,7 @@ class FakeMediator:
     """
 
     def __init__(self):
-        """Initialize all eight signal attributes and empty call-recording lists."""
+        """Initialize all signal attributes and empty call-recording lists."""
         self.iodlist_progress_signal = FakeSignal()
         self.iodlist_loaded_signal = FakeSignal()
         self.iodlist_error_signal = FakeSignal()
@@ -234,23 +250,33 @@ class FakeMediator:
         self.iodmodel_error_signal = FakeSignal()
         self.iodexport_loaded_signal = FakeSignal()
         self.iodexport_error_signal = FakeSignal()
+        self.section_loaded_signal = FakeSignal()
+        self.section_error_signal = FakeSignal()
         self.start_iodlist_worker_calls = []
         self.start_iodmodel_worker_calls = []
+        self.start_iodmodel_worker_force_rebuild_calls = []
         self.start_export_worker_calls = []
+        self.start_section_worker_calls = []
 
     def start_iodlist_worker(self, force_download=False):
         """Record the call and return a dummy (worker, thread) pair."""
         self.start_iodlist_worker_calls.append(force_download)
         return ("fake_worker", "fake_thread")
 
-    def start_iodmodel_worker(self, table_id):
+    def start_iodmodel_worker(self, table_id, force_rebuild=False):
         """Record the call and return a dummy (worker, thread) pair."""
         self.start_iodmodel_worker_calls.append(table_id)
+        self.start_iodmodel_worker_force_rebuild_calls.append(force_rebuild)
         return ("fake_worker", "fake_thread")
 
     def start_export_worker(self, iod_model, fmt, output_path):
         """Record the call and return a dummy (worker, thread) pair."""
         self.start_export_worker_calls.append((iod_model, fmt, output_path))
+        return ("fake_worker", "fake_thread")
+
+    def start_section_worker(self, section_id):
+        """Record the call and return a dummy (worker, thread) pair."""
+        self.start_section_worker_calls.append(section_id)
         return ("fake_worker", "fake_thread")
 
 
@@ -391,6 +417,10 @@ class FakeView:
         self._selected_iod = selected_iod
         self.export_menu_enabled_calls = []
         self.favorite_action_calls = []
+        self.explanation_html_calls = []
+        self.explanation_toggle_calls = []
+        self.explanation_expanded_calls = []
+        self._explanation_expanded = False
 
     def set_details_html(self, html_body):
         """Record the call."""
@@ -449,6 +479,25 @@ class FakeView:
     def set_favorite_action(self, enabled, is_favorite):
         """Record the call."""
         self.favorite_action_calls.append((enabled, is_favorite))
+
+    def set_explanation_html(self, html_body):
+        """Record the call and mark the drawer as expanded, as MainWindow does."""
+        self.explanation_html_calls.append(html_body)
+        self._explanation_expanded = True
+
+    def show_explanation_toggle(self, visible):
+        """Record the call and reset to collapsed, as MainWindow does."""
+        self.explanation_toggle_calls.append(visible)
+        self._explanation_expanded = False
+
+    def set_explanation_expanded(self, expanded):
+        """Record the call and update the tracked expanded state."""
+        self.explanation_expanded_calls.append(expanded)
+        self._explanation_expanded = expanded
+
+    def is_explanation_expanded(self):
+        """Return the tracked expanded state."""
+        return self._explanation_expanded
 
 
 class FakeQAction:
@@ -998,7 +1047,7 @@ class TestHandleAttributeItemClicked:
         state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
         details = {"elem_name": "PatientName", "elem_tag": "(0010,0010)", "elem_type": "1C", "elem_description": "desc"}
 
-        state._handle_attribute_item_clicked(details)
+        state._handle_attribute_item_clicked(details, None)
 
         html = view.details_html_calls[-1]
         assert "Conditional (1C)" in html
@@ -1010,9 +1059,58 @@ class TestHandleAttributeItemClicked:
         state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
         details = {"elem_name": "X", "elem_tag": "", "elem_type": "9", "elem_description": ""}
 
-        state._handle_attribute_item_clicked(details)
+        state._handle_attribute_item_clicked(details, None)
 
         assert "Other (9)" in view.details_html_calls[-1]
+
+    def test_with_section_refs_records_them_and_shows_the_drawer_toggle(self, fake_logger):
+        """A details dict with elem_description_section_refs shows the drawer toggle for them.
+
+        dcmspec names this companion key after the elem_description column's own attribute name
+        (not a plain "description_section_refs"), so this pins the exact key the controller reads.
+        """
+        view = FakeView()
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+        details = {
+            "elem_name": "LUT Descriptor",
+            "elem_tag": "(0028,3002)",
+            "elem_type": "1",
+            "elem_description": "See Section C.11.1.1",
+            "elem_description_section_refs": ["sect_C.11.1.1"],
+        }
+
+        state._handle_attribute_item_clicked(details, "table_A.8-1")
+
+        assert state._current_section_refs == ["sect_C.11.1.1"]
+        assert view.explanation_toggle_calls[-1] is True
+
+    def test_without_section_refs_hides_the_drawer_toggle(self, fake_logger):
+        """A details dict with no section references hides/collapses the drawer toggle."""
+        view = FakeView()
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+        details = {"elem_name": "X", "elem_tag": "", "elem_type": "1", "elem_description": "plain text"}
+
+        state._handle_attribute_item_clicked(details, "table_A.8-1")
+
+        assert state._current_section_refs == []
+        assert view.explanation_toggle_calls[-1] is False
+
+    def test_selecting_a_new_attribute_resets_drawer_content_state(self, fake_logger):
+        """Selecting a new attribute clears any leftover loaded-section/has-content state."""
+        view = FakeView()
+        state = make_controller_state(
+            view=view,
+            model=FakeModel(),
+            logger=fake_logger,
+            _explanation_loaded_section_id="sect_C.1",
+            _explanation_has_content=True,
+        )
+        details = {"elem_name": "X", "elem_tag": "", "elem_type": "1", "elem_description": ""}
+
+        state._handle_attribute_item_clicked(details, "table_A.8-1")
+
+        assert state._explanation_loaded_section_id is None
+        assert state._explanation_has_content is False
 
 
 class TestOnTreeviewRightClick:
@@ -1640,6 +1738,45 @@ class TestHandleIodmodelLoaded:
 
         assert view.status_bar_calls == []
 
+    def test_refreshes_currently_selected_attribute_of_the_reloaded_iod(self, fake_logger):
+        """A reload of the IOD whose attribute is currently selected re-renders its details.
+
+        Regression test: without this, the details pane and drawer kept showing stale
+        pre-reload content/state until the user manually reselected the module and attribute.
+        """
+        entry = IODEntry("Alpha", "table_A.1-1", "url", "Composite")
+        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
+        view = FakeView(ui=FakeUi(iod_tree_view=FakeIodTreeView(model=qt_model)))
+        model = FakeModel(node_attrs={("table_A.1-1", "PatientModule/PatientNameAttr"): {"elem_name": "PatientName"}})
+        state = make_controller_state(
+            view=view,
+            model=model,
+            logger=fake_logger,
+            _current_table_id="table_A.1-1",
+            _current_relative_path="PatientModule/PatientNameAttr",
+        )
+
+        state._handle_iodmodel_loaded(sender=object(), iod_model=FakeIodModel(Node("content")), table_id="table_A.1-1")
+
+        assert "PatientName Attribute" in view.details_html_calls[-1]
+
+    def test_does_not_refresh_when_a_different_iod_was_loaded(self, fake_logger):
+        """A reload of an IOD other than the currently selected attribute's IOD does nothing extra."""
+        entry = IODEntry("Alpha", "table_B.1-1", "url", "Composite")
+        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
+        view = FakeView(ui=FakeUi(iod_tree_view=FakeIodTreeView(model=qt_model)))
+        state = make_controller_state(
+            view=view,
+            model=FakeModel(),
+            logger=fake_logger,
+            _current_table_id="table_A.1-1",
+            _current_relative_path="PatientModule/PatientNameAttr",
+        )
+
+        state._handle_iodmodel_loaded(sender=object(), iod_model=FakeIodModel(Node("content")), table_id="table_B.1-1")
+
+        assert view.details_html_calls == []
+
 
 class TestHandleIodmodelError:
     """Tests for AppController._handle_iodmodel_error."""
@@ -1673,16 +1810,6 @@ class TestHandleIodmodelError:
 class TestOnDetailsLinkClicked:
     """Tests for AppController._on_details_link_clicked."""
 
-    def test_fragment_only_url_shows_anchor_warning(self, fake_logger):
-        """A same-page anchor link (e.g. "#section1") shows the anchor-not-supported dialog."""
-        view = FakeView()
-        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
-
-        state._on_details_link_clicked(QUrl("#section1"))
-
-        assert view.anchor_warning_calls == ["#section1"]
-        assert view.url_warning_calls == []
-
     def test_external_url_shows_url_warning(self, fake_logger):
         """A full external URL shows the "open external link" confirmation dialog."""
         view = FakeView()
@@ -1692,3 +1819,266 @@ class TestOnDetailsLinkClicked:
 
         assert view.url_warning_calls == ["http://example.com/page"]
         assert view.anchor_warning_calls == []
+
+    def test_fragment_matching_current_section_ref_loads_section(self, fake_logger):
+        """A same-page anchor matching the selected attribute's own reference loads that section."""
+        view = FakeView()
+        state = make_controller_state(
+            view=view, model=FakeModel(), logger=fake_logger, _current_section_refs=["sect_C.1"]
+        )
+
+        state._on_details_link_clicked(QUrl("#sect_C.1"))
+
+        assert state.section_service.start_section_worker_calls == ["sect_C.1"]
+        assert view.explanation_toggle_calls[-1] is True
+        assert view.anchor_warning_calls == []
+        assert view.url_warning_calls == []
+
+    def test_fragment_not_matching_any_ref_with_table_id_offers_reload(self, fake_logger):
+        """An unmatched same-page anchor, with a known table_id, offers to reload that IOD."""
+        view = FakeView()
+        state = make_controller_state(
+            view=view,
+            model=FakeModel(),
+            logger=fake_logger,
+            _current_section_refs=[],
+            _current_table_id="table_A.1-1",
+        )
+
+        state._on_details_link_clicked(QUrl("#sect_C.1"))
+
+        assert "reload:table_A.1-1" in view.explanation_html_calls[-1]
+        assert view.anchor_warning_calls == []
+
+    def test_fragment_not_matching_and_no_table_id_does_nothing(self, fake_logger):
+        """An unmatched same-page anchor with no known table_id shows nothing (nothing to reload)."""
+        view = FakeView()
+        state = make_controller_state(
+            view=view, model=FakeModel(), logger=fake_logger, _current_section_refs=[], _current_table_id=None
+        )
+
+        state._on_details_link_clicked(QUrl("#sect_C.1"))
+
+        assert view.explanation_html_calls == []
+        assert view.explanation_toggle_calls == []
+
+    def test_reload_scheme_url_starts_forced_iod_reload(self, fake_logger, monkeypatch):
+        """A "reload:<table_id>" link starts a forced IOD model reload for that table_id."""
+        monkeypatch.setattr(app_controller_module, "LoadIODDialog", FakeLoadIODDialog)
+        FakeLoadIODDialog.instances.clear()
+        view = FakeView()
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+
+        state._on_details_link_clicked(QUrl("reload:table_A.1-1"))
+
+        assert state.iod_model_service.start_iodmodel_worker_calls == ["table_A.1-1"]
+        assert state.iod_model_service.start_iodmodel_worker_force_rebuild_calls == [True]
+
+
+class TestOnExplanationLinkClicked:
+    """Tests for AppController._on_explanation_link_clicked (links within a rendered section)."""
+
+    def test_fragment_only_url_shows_anchor_warning(self, fake_logger):
+        """A same-page anchor within a section's own content shows the anchor-not-supported dialog.
+
+        Nested section resolution isn't supported, so this handler doesn't do the smart routing
+        _on_details_link_clicked does -- it behaves exactly as the details pane did before this
+        feature existed.
+        """
+        view = FakeView()
+        state = make_controller_state(
+            view=view, model=FakeModel(), logger=fake_logger, _current_section_refs=["sect_C.1"]
+        )
+
+        state._on_explanation_link_clicked(QUrl("#sect_C.2"))
+
+        assert view.anchor_warning_calls == ["#sect_C.2"]
+        assert state.section_service.start_section_worker_calls == []
+
+    def test_external_url_shows_url_warning(self, fake_logger):
+        """A full external URL shows the "open external link" confirmation dialog."""
+        view = FakeView()
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+
+        state._on_explanation_link_clicked(QUrl("http://example.com/page"))
+
+        assert view.url_warning_calls == ["http://example.com/page"]
+
+    def test_reload_scheme_url_starts_forced_iod_reload(self, fake_logger, monkeypatch):
+        """The drawer's own "Reload this IOD" link works the same from within the section pane."""
+        monkeypatch.setattr(app_controller_module, "LoadIODDialog", FakeLoadIODDialog)
+        FakeLoadIODDialog.instances.clear()
+        view = FakeView()
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+
+        state._on_explanation_link_clicked(QUrl("reload:table_A.1-1"))
+
+        assert state.iod_model_service.start_iodmodel_worker_calls == ["table_A.1-1"]
+        assert state.iod_model_service.start_iodmodel_worker_force_rebuild_calls == [True]
+
+
+class TestOnSectionLinkClicked:
+    """Tests for AppController._on_section_link_clicked."""
+
+    def test_not_yet_loaded_starts_worker_and_shows_loading_message(self, fake_logger):
+        """An unloaded section starts the background worker and shows a loading placeholder."""
+        view = FakeView()
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+
+        state._on_section_link_clicked("sect_C.1")
+
+        assert state.section_service.start_section_worker_calls == ["sect_C.1"]
+        assert view.explanation_toggle_calls[-1] is True
+        assert "Loading" in view.explanation_html_calls[-1]
+        assert state._explanation_has_content is True
+
+    def test_already_loaded_section_just_expands_without_refetching(self, fake_logger):
+        """Re-clicking an already-loaded section's link just expands it, without a new fetch."""
+        view = FakeView()
+        state = make_controller_state(
+            view=view, model=FakeModel(), logger=fake_logger, _explanation_loaded_section_id="sect_C.1"
+        )
+
+        state._on_section_link_clicked("sect_C.1")
+
+        assert state.section_service.start_section_worker_calls == []
+        assert view.explanation_expanded_calls[-1] is True
+
+
+class TestHandleSectionLoaded:
+    """Tests for AppController._handle_section_loaded."""
+
+    def test_renders_section_html_and_records_loaded_section_id(self, fake_logger):
+        """A successfully loaded section's content.html is rendered and its id remembered."""
+        view = FakeView()
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+        section_model = types.SimpleNamespace(content=types.SimpleNamespace(html="<p>Section content</p>"))
+
+        state._handle_section_loaded(state.section_service, section_model, "sect_C.1")
+
+        assert view.explanation_html_calls[-1] == "<p>Section content</p>"
+        assert state._explanation_loaded_section_id == "sect_C.1"
+
+
+class TestHandleSectionError:
+    """Tests for AppController._handle_section_error."""
+
+    def test_renders_error_inline_in_drawer_not_as_a_dialog(self, fake_logger):
+        """A section load failure is shown inline in the drawer, not as a modal error dialog."""
+        view = FakeView()
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+
+        state._handle_section_error(state.section_service, "boom")
+
+        assert "boom" in view.explanation_html_calls[-1]
+        assert view.error_calls == []
+
+
+class TestShowSectionUnavailable:
+    """Tests for AppController._show_section_unavailable."""
+
+    def test_no_table_id_does_nothing(self, fake_logger):
+        """With no known table_id, there's nothing to offer reloading, so nothing is shown."""
+        view = FakeView()
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger, _current_table_id=None)
+
+        state._show_section_unavailable()
+
+        assert view.explanation_html_calls == []
+
+    def test_with_table_id_shows_reload_link(self, fake_logger):
+        """With a known table_id, the drawer shows a message with a link to reload that IOD."""
+        view = FakeView()
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger, _current_table_id="table_A.1-1")
+
+        state._show_section_unavailable()
+
+        assert view.explanation_toggle_calls[-1] is True
+        assert 'href="reload:table_A.1-1"' in view.explanation_html_calls[-1]
+        assert state._explanation_has_content is True
+
+
+class TestOnExplanationToggleClicked:
+    """Tests for AppController._on_explanation_toggle_clicked."""
+
+    def test_nothing_loaded_yet_loads_the_first_reference(self, fake_logger):
+        """With no section loaded yet, the toggle button loads the attribute's first reference."""
+        view = FakeView()
+        state = make_controller_state(
+            view=view, model=FakeModel(), logger=fake_logger, _current_section_refs=["sect_C.1", "sect_C.2"]
+        )
+
+        state._on_explanation_toggle_clicked()
+
+        assert state.section_service.start_section_worker_calls == ["sect_C.1"]
+
+    def test_nothing_loaded_and_no_references_does_nothing(self, fake_logger):
+        """With no section loaded and no references at all, the toggle button does nothing."""
+        view = FakeView()
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger, _current_section_refs=[])
+
+        state._on_explanation_toggle_clicked()
+
+        assert state.section_service.start_section_worker_calls == []
+        assert view.explanation_expanded_calls == []
+
+    def test_already_loaded_toggles_expanded_state(self, fake_logger):
+        """Once a section is loaded, the toggle button just flips its expanded/collapsed state."""
+        view = FakeView()
+        view._explanation_expanded = True
+        state = make_controller_state(
+            view=view,
+            model=FakeModel(),
+            logger=fake_logger,
+            _explanation_loaded_section_id="sect_C.1",
+            _explanation_has_content=True,
+        )
+
+        state._on_explanation_toggle_clicked()
+
+        assert state.section_service.start_section_worker_calls == []
+        assert view.explanation_expanded_calls[-1] is False
+
+    def test_unavailable_message_shown_toggles_expanded_state_too(self, fake_logger):
+        """Toggling while the drawer shows the "not available, reload" message collapses/expands it.
+
+        Regression test: this message has no loaded section id, so the toggle must key off a
+        broader "has content" flag rather than _explanation_loaded_section_id, or clicking it
+        while this message is shown does nothing at all.
+        """
+        view = FakeView()
+        view._explanation_expanded = True
+        state = make_controller_state(
+            view=view,
+            model=FakeModel(),
+            logger=fake_logger,
+            _current_section_refs=[],
+            _explanation_loaded_section_id=None,
+            _explanation_has_content=True,
+        )
+
+        state._on_explanation_toggle_clicked()
+
+        assert state.section_service.start_section_worker_calls == []
+        assert view.explanation_expanded_calls[-1] is False
+
+
+class TestOnReloadIodLinkClicked:
+    """Tests for AppController._on_reload_iod_link_clicked."""
+
+    def test_starts_forced_reload_and_shows_progress_dialog(self, fake_logger, monkeypatch):
+        """Clicking "Reload this IOD" starts a forced reload and shows the loading progress dialog."""
+        monkeypatch.setattr(app_controller_module, "LoadIODDialog", FakeLoadIODDialog)
+        FakeLoadIODDialog.instances.clear()
+        iod_tree_view = FakeIodTreeView()
+        view = FakeView(ui=FakeUi(iod_tree_view=iod_tree_view))
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+
+        state._on_reload_iod_link_clicked("table_A.1-1")
+
+        assert state.iod_model_service.start_iodmodel_worker_calls == ["table_A.1-1"]
+        assert state.iod_model_service.start_iodmodel_worker_force_rebuild_calls == [True]
+        assert len(FakeLoadIODDialog.instances) == 1
+        assert FakeLoadIODDialog.instances[0].shown is True
+        assert iod_tree_view.set_enabled_calls == [False]
+        assert view.explanation_toggle_calls[-1] is False

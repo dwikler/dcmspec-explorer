@@ -49,7 +49,14 @@ class IODListLoaderWorker:
 class IODModelLoaderWorker:
     """Load a single IOD model in a background thread."""
 
-    def __init__(self, model: Any, table_id: str, logger: logging.Logger, event_queue: queue.Queue) -> None:
+    def __init__(
+        self,
+        model: Any,
+        table_id: str,
+        logger: logging.Logger,
+        event_queue: queue.Queue,
+        force_rebuild: bool = False,
+    ) -> None:
         """Initialize the worker with the model and table ID.
 
         Args:
@@ -57,19 +64,23 @@ class IODModelLoaderWorker:
             table_id: The table ID of the IOD model to load.
             logger: The logger instance for logging progress and errors.
             event_queue: The event queue to put progress updates into.
+            force_rebuild: Whether to ignore the cache and rebuild the model from a fresh download.
 
         """
         self.model = model
         self.table_id = table_id
         self.logger = logger
         self.event_queue = event_queue
+        self.force_rebuild = force_rebuild
 
     def run(self) -> None:
         """Run the worker to load a single IOD model and send events to the event queue."""
         self.logger.debug(f"IODModelLoaderWorker created in thread: {threading.current_thread().name}")
         progress_observer = ServiceProgressObserver(self.event_queue)
         try:
-            iod_model = self.model.load_iod_model(self.table_id, self.logger, progress_observer=progress_observer)
+            iod_model = self.model.load_iod_model(
+                self.table_id, self.logger, progress_observer=progress_observer, force_rebuild=self.force_rebuild
+            )
             self.event_queue.put(("loaded", iod_model))
         except Exception as e:
             self.logger.exception(f"Failed to load IOD model for table_id: {self.table_id}")

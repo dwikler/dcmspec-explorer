@@ -1,8 +1,10 @@
 """Controller class for the DCMspec Explorer application."""
 
+import html
+import os
 import re
 import threading
-from typing import Any, Optional, cast
+from typing import Any, List, Optional, cast
 import warnings
 import contextlib
 
@@ -23,6 +25,7 @@ from dcmspec_explorer.services.service_mediator import (
     IODListLoaderServiceMediator,
     IODModelLoaderServiceMediator,
     IODExportServiceMediator,
+    SectionLoaderServiceMediator,
 )
 from dcmspec_explorer.services.favorites_manager import FavoritesManager
 
@@ -100,6 +103,10 @@ class AppController(QObject):
         self.service = IODListLoaderServiceMediator(self.model, self.logger, parent=self)
         self.iod_model_service = IODModelLoaderServiceMediator(self.model, self.logger, parent=self)
         self.export_service = IODExportServiceMediator(self.model, self.logger, parent=self)
+        self.section_service = SectionLoaderServiceMediator(self.model, self.logger, parent=self)
+
+        # Let the explanation drawer resolve a section's relative image paths against the standard cache
+        self.view.set_explanation_image_search_paths([os.path.join(self.config.cache_dir, "standard")])
 
         # Use QTimer to ensure the treeview is only initialized after the window is shown
         QTimer.singleShot(0, self.initialize_treeview)
@@ -109,7 +116,9 @@ class AppController(QObject):
         self.view.search_text_changed.connect(self._on_search_text_changed)
         self.view.iod_treeview_item_selected.connect(self._on_treeview_item_clicked)
         self.view.iod_treeview_right_click.connect(self._on_treeview_right_click)
-        self.view.ui.detailsTextBrowser.anchorClicked.connect(self._on_details_link_clicked)
+        self.view.details_link_clicked.connect(self._on_details_link_clicked)
+        self.view.explanation_link_clicked.connect(self._on_explanation_link_clicked)
+        self.view.explanation_toggle_clicked.connect(self._on_explanation_toggle_clicked)
         self.view.toggle_favorite_display_clicked.connect(self._on_toggle_favorite_display_clicked)
         self.view.check_for_updates_clicked.connect(self._on_check_for_updates_clicked)
         self.view.export_csv_action_triggered.connect(lambda: self._export_selected_iod("csv"))
@@ -125,6 +134,13 @@ class AppController(QObject):
         self.progress_dialog: Optional[LoadIODDialog] = None
 
         self._iodmodel_loaded_call_count = 0
+
+        # State for the currently selected attribute's explanatory section drawer
+        self._current_table_id: Optional[str] = None
+        self._current_relative_path: Optional[str] = None
+        self._current_section_refs: List[str] = []
+        self._explanation_loaded_section_id: Optional[str] = None
+        self._explanation_has_content: bool = False
 
     def run(self) -> None:
         """Show the main application window and start the user interface."""
@@ -180,24 +196,30 @@ class AppController(QObject):
 
         else:
             # third-level (Attribute)
+            table_id = self.treeview_adapter.get_table_id_for_item(selected_item_name)
             details = self.get_selected_item_details(selected_item_name)
             if details is not None:
-                self._handle_attribute_item_clicked(details)
+                self._current_relative_path = self._relative_path_for_item(selected_item_name)
+                self._handle_attribute_item_clicked(details, table_id)
             else:
                 self.view.set_nodetails_html(selected_item_name, "Attribute")
+
+    @staticmethod
+    def _relative_path_for_item(selected_item: QStandardItem) -> str:
+        """Return the relative path (from the SpecModel root) for a treeview item's NODE_PATH_ROLE."""
+        full_path = selected_item.data(NODE_PATH_ROLE) or ""
+        path_parts = full_path.split("/") if full_path else []
+        # Skip "content" if present
+        if path_parts and path_parts[0] == "content":
+            return "/".join(path_parts[1:])
+        return full_path
 
     def get_selected_item_details(self, selected_item: QStandardItem) -> Optional[dict]:
         """Return SpecModel node attributes for the selected treeview item."""
         table_id = self.treeview_adapter.get_table_id_for_item(selected_item)
         if table_id is None:
             return None
-        full_path = selected_item.data(NODE_PATH_ROLE) or ""
-        path_parts = full_path.split("/") if full_path else []
-        # Skip "content" if present
-        if path_parts and path_parts[0] == "content":
-            relative_path = "/".join(path_parts[1:])
-        else:
-            relative_path = full_path
+        relative_path = self._relative_path_for_item(selected_item)
         return self.model.get_node_public_attrs(table_id, relative_path)
 
     def _on_treeview_right_click(self, index: QModelIndex, global_pos):
@@ -400,10 +422,24 @@ class AppController(QObject):
                 <p>See <a href="{table_url}">PS3.3 Table {table_ref}</a></p>
                 """
         self.view.set_details_html(html)
+        self.view.show_explanation_toggle(False)
 
         # Stop here if children are already populated
         if selected_item_name.hasChildren() and selected_item_name.rowCount() > 0:
             return
+
+        self._start_iod_model_load(table_id)
+
+        # Set expand property for the selected iod item in the view (will be effective when item will be populated)
+        self.view.ui.iodTreeView.expand(index)
+
+    def _start_iod_model_load(self, table_id: str, force_rebuild: bool = False) -> None:
+        """Start (or force-reload) an IOD model load in the background and wire up its handlers.
+
+        Used both for a top-level IOD's first load and for an explicit reload triggered from the
+        explanatory section drawer (e.g. to pick up section references missing from an older cache).
+        """
+        self.view.show_explanation_toggle(False)
 
         # Update status bar message and display progress dialog
         self.view.update_status_bar(message="Loading IOD specification...")
@@ -412,7 +448,9 @@ class AppController(QObject):
         self.view.ui.iodTreeView.setEnabled(False)
 
         # Start the IOD model loader worker in a background thread
-        self._iod_model_worker, self._iod_model_thread = self.iod_model_service.start_iodmodel_worker(table_id)
+        self._iod_model_worker, self._iod_model_thread = self.iod_model_service.start_iodmodel_worker(
+            table_id, force_rebuild=force_rebuild
+        )
 
         # Disconnect previous signal connections to avoid duplicate handlers
         self._safe_disconnect(
@@ -438,9 +476,6 @@ class AppController(QObject):
             self._handle_iodmodel_error, Qt.ConnectionType.QueuedConnection
         )
 
-        # Set expand property for the selected iod item in the view (will be effective when item will be populated)
-        self.view.ui.iodTreeView.expand(index)
-
     def _handle_module_item_clicked(self, details: dict, iod_kind: str) -> None:
         """Handle click on a second-level (Module) item."""
         ie = details.get("ie", "Unspecified")
@@ -463,8 +498,9 @@ class AppController(QObject):
                 """
 
         self.view.set_details_html(html)
+        self.view.show_explanation_toggle(False)
 
-    def _handle_attribute_item_clicked(self, details: dict) -> None:
+    def _handle_attribute_item_clicked(self, details: dict, table_id: Optional[str]) -> None:
         """Handle click on a third-level or deeper (Attribute) item."""
         elem_type = details.get("elem_type", "Unspecified")
         type_display = DICOM_TYPE_MAP.get(elem_type, f"Other ({elem_type})")
@@ -474,6 +510,13 @@ class AppController(QObject):
             <p><span class="label">Description:</span> {details.get("elem_description", "")}</p>
             """
         self.view.set_details_html(html)
+
+        self._current_table_id = table_id
+        # Key name is derived by dcmspec from the elem_description column's own attribute name.
+        self._current_section_refs = details.get("elem_description_section_refs") or []
+        self._explanation_loaded_section_id = None
+        self._explanation_has_content = False
+        self.view.show_explanation_toggle(bool(self._current_section_refs))
 
     def _handle_iodlist_progress(self, sender: object, progress: Progress) -> None:
         percent = progress.percent
@@ -541,6 +584,20 @@ class AppController(QObject):
                 self.progress_dialog = None
             self.view.ui.iodTreeView.setEnabled(True)
             self.view.update_status_bar(message="IOD specification loaded.")
+            self._refresh_selected_attribute_after_load(table_id)
+
+    def _refresh_selected_attribute_after_load(self, table_id: str) -> None:
+        """Re-render the currently selected attribute's details after its IOD was (re)loaded.
+
+        Keeps the details pane and drawer from showing stale pre-reload content when the load
+        was triggered while that attribute was already selected (e.g. via the drawer's "Reload
+        this IOD" link) -- a no-op otherwise, since _current_table_id only matches when so.
+        """
+        if self._current_table_id != table_id or not self._current_relative_path:
+            return
+        details = self.model.get_node_public_attrs(table_id, self._current_relative_path)
+        if details is not None:
+            self._handle_attribute_item_clicked(details, table_id)
 
     def _handle_iodmodel_error(self, sender: object, message: str) -> None:
         self.logger.error(f"Error loading IOD model: {message}")
@@ -553,12 +610,99 @@ class AppController(QObject):
         self.view.update_status_bar(message="Error loading IOD specification.")
 
     def _on_details_link_clicked(self, url: QUrl) -> None:
-        """Handle clicks on links in the detailsTextBrowser."""
+        """Handle clicks on links in the details pane, routing section references to the drawer."""
         url_str = url.toString()
-        if (url.scheme() == "" and url.host() == "" and url.fragment()) or url_str.startswith("#"):
+        is_same_page_anchor = (url.scheme() == "" and url.host() == "" and url.fragment()) or url_str.startswith("#")
+        if url.scheme() == "reload":
+            self._on_reload_iod_link_clicked(url.path())
+        elif is_same_page_anchor:
+            section_id = url.fragment()
+            if section_id in self._current_section_refs:
+                self._on_section_link_clicked(section_id)
+            else:
+                self._show_section_unavailable()
+        else:
+            self.view.show_url_link_warning_dialog(url_str)
+
+    def _on_explanation_link_clicked(self, url: QUrl) -> None:
+        """Handle clicks on links within a rendered explanatory section's own content.
+
+        Links in explanation area are not resolved as in attributes details if referencing a section
+        and are handled as generic links (except the special reload link)
+        """
+        url_str = url.toString()
+        if url.scheme() == "reload":
+            self._on_reload_iod_link_clicked(url.path())
+        elif (url.scheme() == "" and url.host() == "" and url.fragment()) or url_str.startswith("#"):
             self.view.show_anchor_link_warning_dialog(url_str)
         else:
             self.view.show_url_link_warning_dialog(url_str)
+
+    def _on_explanation_toggle_clicked(self) -> None:
+        """Handle a click on the explanation drawer's toggle button.
+
+        Loads (and expands) the current attribute's first referenced section if the drawer has no
+        content yet (nothing loaded, and no "unavailable" message either), otherwise just toggles
+        whatever's currently shown (loaded section, unavailable message, or an error) open/closed.
+        """
+        if self._explanation_has_content:
+            self.view.set_explanation_expanded(not self.view.is_explanation_expanded())
+        elif self._current_section_refs:
+            self._on_section_link_clicked(self._current_section_refs[0])
+
+    def _on_section_link_clicked(self, section_id: str) -> None:
+        """Load (if needed) and show the given explanatory section in the drawer."""
+        if section_id == self._explanation_loaded_section_id:
+            self.view.set_explanation_expanded(True)
+            return
+
+        self.view.show_explanation_toggle(True)
+        self.view.set_explanation_html("<p><em>Loading explanatory section&hellip;</em></p>")
+        self._explanation_has_content = True
+
+        self._section_worker, self._section_thread = self.section_service.start_section_worker(section_id)
+
+        self._safe_disconnect(
+            self.section_service.section_loaded_signal,
+            self.section_service.section_error_signal,
+        )
+        self.section_service.section_loaded_signal.connect(
+            lambda sender, section_model, section_id=section_id: self._handle_section_loaded(
+                sender, section_model, section_id
+            ),
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self.section_service.section_error_signal.connect(
+            self._handle_section_error, Qt.ConnectionType.QueuedConnection
+        )
+
+    def _handle_section_loaded(self, sender: object, section_model: Any, section_id: str) -> None:
+        """Render a successfully loaded explanatory section's HTML in the drawer."""
+        self._explanation_loaded_section_id = section_id
+        section_html = getattr(section_model.content, "html", "")
+        self.view.set_explanation_html(section_html)
+
+    def _handle_section_error(self, sender: object, message: str) -> None:
+        """Show an explanatory section load failure inline in the drawer, not as a modal dialog."""
+        self.logger.error(f"Error signal received from {sender}: {message}")
+        self.view.set_explanation_html(f"<p>Could not load this explanatory section: {html.escape(message)}</p>")
+
+    def _show_section_unavailable(self) -> None:
+        """Show the drawer's 'not available in cache' message with a link to reload the current IOD."""
+        if not self._current_table_id:
+            return
+        section_html = (
+            "<p>This reference isn't available in your local cache yet "
+            "(this IOD may have been loaded before this feature was added).</p>"
+            f'<p><a href="reload:{self._current_table_id}">Reload this IOD</a></p>'
+        )
+        self.view.show_explanation_toggle(True)
+        self.view.set_explanation_html(section_html)
+        self._explanation_has_content = True
+
+    def _on_reload_iod_link_clicked(self, table_id: str) -> None:
+        """Force-reload the given IOD from source, e.g. to pick up newly available section references."""
+        self._start_iod_model_load(table_id, force_rebuild=True)
 
     def apply_filter_and_sort(self, iod_entry_list: Optional[list[IODEntry]] = None) -> None:
         """Apply current search filter and sort to the IOD list and update the treeview."""

@@ -37,7 +37,7 @@ class FakeModel:
         """Report progress if configured, then return iod_list or raise the canned error."""
         return self._result(progress_observer, self.iod_list)
 
-    def load_iod_model(self, table_id, logger, progress_observer):
+    def load_iod_model(self, table_id, logger, progress_observer, force_rebuild=False):
         """Report progress if configured, then return iod_model or raise the canned error."""
         return self._result(progress_observer, self.iod_model)
 

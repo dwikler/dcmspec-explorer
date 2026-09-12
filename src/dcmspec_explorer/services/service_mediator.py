@@ -142,9 +142,11 @@ class IODModelLoaderServiceMediator(BaseServiceMediator):
             "error": (self.iodmodel_error_signal, True),
         }
 
-    def start_iodmodel_worker(self, table_id: str) -> Tuple[IODModelLoaderWorker, threading.Thread]:
+    def start_iodmodel_worker(
+        self, table_id: str, force_rebuild: bool = False
+    ) -> Tuple[IODModelLoaderWorker, threading.Thread]:
         """Start the IOD model loader worker in a background thread."""
-        return self.start_worker(IODModelLoaderWorker, model=self.model, table_id=table_id)
+        return self.start_worker(IODModelLoaderWorker, model=self.model, table_id=table_id, force_rebuild=force_rebuild)
 
 
 class IODExportServiceMediator(BaseServiceMediator):
