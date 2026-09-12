@@ -18,16 +18,18 @@ from dcmspec_explorer.services.service_mediator import (
     IODListLoaderServiceMediator,
     IODModelLoaderServiceMediator,
     IODExportServiceMediator,
+    SectionLoaderServiceMediator,
 )
 
 
 class FakeModel:
     """Fake model whose load methods return/raise immediately, optionally reporting progress first."""
 
-    def __init__(self, iod_list=None, iod_model=None, error=None, progress=None):
+    def __init__(self, iod_list=None, iod_model=None, section_model=None, error=None, progress=None):
         """Initialize with the value or exception each load method should produce."""
         self.iod_list = iod_list
         self.iod_model = iod_model
+        self.section_model = section_model
         self.error = error
         self.progress = progress
 
@@ -38,6 +40,12 @@ class FakeModel:
     def load_iod_model(self, table_id, logger, progress_observer):
         """Report progress if configured, then return iod_model or raise the canned error."""
         return self._result(progress_observer, self.iod_model)
+
+    def get_or_load_section(self, section_id, logger):
+        """Return section_model, or raise the canned error."""
+        if self.error is not None:
+            raise self.error
+        return self.section_model
 
     def _result(self, progress_observer, value):
         """Report progress if configured, then raise the canned error or return value."""
@@ -137,6 +145,40 @@ class TestIODModelLoaderServiceMediatorHappyPath:
         emitted_mediator, message = blocker.args
         assert emitted_mediator is mediator
         assert message == "bad table_id"
+        assert not hasattr(mediator, "_worker")
+        assert not hasattr(mediator, "_thread")
+        assert not mediator._poll_timer.isActive()
+
+
+class TestSectionLoaderServiceMediatorHappyPath:
+    """Tests for SectionLoaderServiceMediator's signal emission and cleanup on real worker events."""
+
+    def test_loaded_event_emits_loaded_signal_and_cleans_up(self, qtbot, fake_logger):
+        """A successful load emits section_loaded_signal, stops the poll timer, and drops worker/thread."""
+        model = FakeModel(section_model="some_section_model")
+        mediator = SectionLoaderServiceMediator(model=model, logger=fake_logger)
+
+        with qtbot.waitSignal(mediator.section_loaded_signal, timeout=1000) as blocker:
+            mediator.start_section_worker(section_id="sect_C.7.6.16.2.1.1")
+
+        emitted_mediator, section_model = blocker.args
+        assert emitted_mediator is mediator
+        assert section_model == "some_section_model"
+        assert not hasattr(mediator, "_worker")
+        assert not hasattr(mediator, "_thread")
+        assert not mediator._poll_timer.isActive()
+
+    def test_error_event_emits_error_signal_and_cleans_up(self, qtbot, fake_logger):
+        """A raised error emits section_error_signal with its message and does the same cleanup."""
+        model = FakeModel(error=ValueError("section not found"))
+        mediator = SectionLoaderServiceMediator(model=model, logger=fake_logger)
+
+        with qtbot.waitSignal(mediator.section_error_signal, timeout=1000) as blocker:
+            mediator.start_section_worker(section_id="sect_C.7.6.16.2.1.1")
+
+        emitted_mediator, message = blocker.args
+        assert emitted_mediator is mediator
+        assert message == "section not found"
         assert not hasattr(mediator, "_worker")
         assert not hasattr(mediator, "_thread")
         assert not mediator._poll_timer.isActive()

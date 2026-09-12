@@ -11,6 +11,7 @@ from dcmspec.progress import Progress
 from dcmspec_explorer.services.iod_loading_service import IODListLoaderWorker
 from dcmspec_explorer.services.iod_loading_service import IODModelLoaderWorker
 from dcmspec_explorer.services.iod_export_service import IODExportWorker
+from dcmspec_explorer.services.section_loading_service import SectionLoaderWorker
 
 
 class BaseServiceMediator(QObject):
@@ -166,3 +167,23 @@ class IODExportServiceMediator(BaseServiceMediator):
     ) -> Tuple[IODExportWorker, threading.Thread]:
         """Start the IOD export worker in a background thread."""
         return self.start_worker(IODExportWorker, iod_model=iod_model, fmt=fmt, output_path=output_path)
+
+
+class SectionLoaderServiceMediator(BaseServiceMediator):
+    """Mediator for SectionLoaderWorker, bridges service worker and Qt signals."""
+
+    # Define Qt Signals with data/payload types
+    section_loaded_signal = Signal(object, object)
+    section_error_signal = Signal(object, str)
+
+    def __init__(self, model: Any, logger: Any, parent: Optional[QObject] = None) -> None:
+        """Initialize the SectionLoaderServiceMediator."""
+        super().__init__(model, logger, parent)
+        self._signal_map = {
+            "loaded": (self.section_loaded_signal, True),
+            "error": (self.section_error_signal, True),
+        }
+
+    def start_section_worker(self, section_id: str) -> Tuple[SectionLoaderWorker, threading.Thread]:
+        """Start the section loader worker in a background thread."""
+        return self.start_worker(SectionLoaderWorker, model=self.model, section_id=section_id)
