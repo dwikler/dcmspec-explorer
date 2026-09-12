@@ -405,7 +405,7 @@ toml = ["tomli ; python_full_version <= \"3.11.0a6\""]
 
 [[package]]
 name = "dcmspec"
-version = "0.3.1"
+version = "0.4.0"
 description = "Toolkit for extracting, parsing, and processing DICOM specifications."
 optional = false
 python-versions = ">=3.10,<4.0"
@@ -432,7 +432,7 @@ pdf = ["camelot-py (>=1.0.0,<2.0.0)", "opencv-python-headless (>=4.12.0.88,<5.0.
 type = "git"
 url = "https://github.com/dwikler/dcmspec.git"
 reference = "HEAD"
-resolved_reference = "813476e9f324a9f230e9bf05b749e5c5f45aef3c"
+resolved_reference = "a8143e2bd6763dc225c91d422be8822a9d9b7fee"
 
 [[package]]
 name = "distlib"

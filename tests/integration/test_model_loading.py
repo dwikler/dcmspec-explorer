@@ -191,3 +191,89 @@ class TestLoadIodModel:
 
         iod_factory_call = factory_calls[0]
         assert iod_factory_call["column_to_attr"] == expected_mapping
+
+    def test_module_factory_scans_description_for_section_references(self, model, monkeypatch, fake_logger):
+        """The module SpecFactory's parser_kwargs scan elem_description (column 3) for section references."""
+        factory_calls = []
+
+        class FakeSpecFactory:
+            def __init__(self, **kwargs):
+                factory_calls.append(kwargs)
+
+        built = _make_specmodel()
+        monkeypatch.setattr("dcmspec_explorer.model.model.SpecFactory", FakeSpecFactory)
+        monkeypatch.setattr(
+            "dcmspec_explorer.model.model.IODSpecBuilder.build_from_url",
+            lambda self, **kwargs: (built, None),
+        )
+
+        model.load_iod_model("table_A.2-1", fake_logger)
+
+        module_factory_call = factory_calls[1]
+        assert module_factory_call["parser_kwargs"]["ref_columns"] == [3]
+
+    def test_force_rebuild_bypasses_in_memory_cache_and_forces_download(self, model, monkeypatch, fake_logger):
+        """force_rebuild=True ignores an in-memory cached model and passes force_download=True."""
+        model._iod_specmodels["table_A.2-1"] = _make_specmodel()
+        rebuilt = _make_specmodel()
+        build_calls = []
+
+        def fake_build_from_url(self, **kwargs):
+            build_calls.append(kwargs)
+            return rebuilt, None
+
+        monkeypatch.setattr("dcmspec_explorer.model.model.IODSpecBuilder.build_from_url", fake_build_from_url)
+
+        result = model.load_iod_model("table_A.2-1", fake_logger, force_rebuild=True)
+
+        assert result is rebuilt
+        assert model.iod_specmodels["table_A.2-1"] is rebuilt
+        assert build_calls[0]["force_download"] is True
+
+
+class TestGetOrLoadSection:
+    """Tests for Model.get_or_load_section."""
+
+    def test_returns_in_memory_cached_instance_without_building(self, model, fake_logger):
+        """A section already in the registry is returned without building a new SpecFactory."""
+        cached = _make_specmodel()
+        model._section_specmodels["sect_C.1"] = cached
+
+        result = model.get_or_load_section("sect_C.1", fake_logger)
+
+        assert result is cached
+
+    def test_success_builds_resolves_images_and_caches_the_section(self, model, monkeypatch, fake_logger):
+        """A fresh section is built via SpecFactory, has its images resolved, and is cached in the registry."""
+        built = _make_specmodel()
+        build_model_calls = []
+        resolve_calls = []
+
+        class FakeSectionFactory:
+            def __init__(self, **kwargs):
+                self.input_handler = object()
+
+            def load_document(self, **kwargs):
+                return "fake-dom"
+
+            def build_model(self, **kwargs):
+                build_model_calls.append(kwargs)
+                return built
+
+        class FakeImageResolver:
+            def __init__(self, **kwargs):
+                pass
+
+            def resolve(self, section_model, url, **kwargs):
+                resolve_calls.append((section_model, url))
+
+        monkeypatch.setattr("dcmspec_explorer.model.model.SpecFactory", FakeSectionFactory)
+        monkeypatch.setattr("dcmspec_explorer.model.model.SectionImageResolver", FakeImageResolver)
+
+        result = model.get_or_load_section("sect_C.7.6.16.2.1.1", fake_logger)
+
+        assert result is built
+        assert model._section_specmodels["sect_C.7.6.16.2.1.1"] is built
+        assert resolve_calls == [(built, model.PART3_XHTML_URL)]
+        assert build_model_calls[0]["table_id"] == "sect_C.7.6.16.2.1.1"
+        assert build_model_calls[0]["json_file_name"] == "sections/sect_C.7.6.16.2.1.1.json"
