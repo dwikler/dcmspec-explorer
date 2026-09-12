@@ -118,7 +118,7 @@ class AppController(QObject):
         self.view.iod_treeview_right_click.connect(self._on_treeview_right_click)
         self.view.details_link_clicked.connect(self._on_details_link_clicked)
         self.view.explanation_link_clicked.connect(self._on_explanation_link_clicked)
-        self.view.explanation_toggle_clicked.connect(self._on_explanation_toggle_clicked)
+        self.view.explanation_close_clicked.connect(self._on_explanation_close_clicked)
         self.view.toggle_favorite_display_clicked.connect(self._on_toggle_favorite_display_clicked)
         self.view.check_for_updates_clicked.connect(self._on_check_for_updates_clicked)
         self.view.export_csv_action_triggered.connect(lambda: self._export_selected_iod("csv"))
@@ -140,7 +140,6 @@ class AppController(QObject):
         self._current_relative_path: Optional[str] = None
         self._current_section_refs: List[str] = []
         self._explanation_loaded_section_id: Optional[str] = None
-        self._explanation_has_content: bool = False
 
     def run(self) -> None:
         """Show the main application window and start the user interface."""
@@ -422,7 +421,7 @@ class AppController(QObject):
                 <p>See <a href="{table_url}">PS3.3 Table {table_ref}</a></p>
                 """
         self.view.set_details_html(html)
-        self.view.show_explanation_toggle(False)
+        self.view.hide_explanation()
 
         # Stop here if children are already populated
         if selected_item_name.hasChildren() and selected_item_name.rowCount() > 0:
@@ -439,7 +438,7 @@ class AppController(QObject):
         Used both for a top-level IOD's first load and for an explicit reload triggered from the
         explanatory section drawer (e.g. to pick up section references missing from an older cache).
         """
-        self.view.show_explanation_toggle(False)
+        self.view.hide_explanation()
 
         # Update status bar message and display progress dialog
         self.view.update_status_bar(message="Loading IOD specification...")
@@ -498,7 +497,7 @@ class AppController(QObject):
                 """
 
         self.view.set_details_html(html)
-        self.view.show_explanation_toggle(False)
+        self.view.hide_explanation()
 
     def _handle_attribute_item_clicked(self, details: dict, table_id: Optional[str]) -> None:
         """Handle click on a third-level or deeper (Attribute) item."""
@@ -514,9 +513,8 @@ class AppController(QObject):
         self._current_table_id = table_id
         # Key name is derived by dcmspec from the elem_description column's own attribute name.
         self._current_section_refs = details.get("elem_description_section_refs") or []
-        self._explanation_loaded_section_id = None
-        self._explanation_has_content = False
-        self.view.show_explanation_toggle(bool(self._current_section_refs))
+        # Hide any drawer left open by the previous attribute
+        self.view.hide_explanation()
 
     def _handle_iodlist_progress(self, sender: object, progress: Progress) -> None:
         percent = progress.percent
@@ -638,27 +636,18 @@ class AppController(QObject):
         else:
             self.view.show_url_link_warning_dialog(url_str)
 
-    def _on_explanation_toggle_clicked(self) -> None:
-        """Handle a click on the explanation drawer's toggle button.
-
-        Loads (and expands) the current attribute's first referenced section if the drawer has no
-        content yet (nothing loaded, and no "unavailable" message either), otherwise just toggles
-        whatever's currently shown (loaded section, unavailable message, or an error) open/closed.
-        """
-        if self._explanation_has_content:
-            self.view.set_explanation_expanded(not self.view.is_explanation_expanded())
-        elif self._current_section_refs:
-            self._on_section_link_clicked(self._current_section_refs[0])
+    def _on_explanation_close_clicked(self) -> None:
+        """Hide the explanation drawer without discarding its already-rendered content."""
+        self.view.hide_explanation()
 
     def _on_section_link_clicked(self, section_id: str) -> None:
         """Load (if needed) and show the given explanatory section in the drawer."""
         if section_id == self._explanation_loaded_section_id:
-            self.view.set_explanation_expanded(True)
+            self.view.show_explanation()
             return
 
-        self.view.show_explanation_toggle(True)
+        self.view.show_explanation()
         self.view.set_explanation_html("<p><em>Loading explanatory section&hellip;</em></p>")
-        self._explanation_has_content = True
 
         self._section_worker, self._section_thread = self.section_service.start_section_worker(section_id)
 
@@ -696,9 +685,8 @@ class AppController(QObject):
             "(this IOD may have been loaded before this feature was added).</p>"
             f'<p><a href="reload:{self._current_table_id}">Reload this IOD</a></p>'
         )
-        self.view.show_explanation_toggle(True)
+        self.view.show_explanation()
         self.view.set_explanation_html(section_html)
-        self._explanation_has_content = True
 
     def _on_reload_iod_link_clicked(self, table_id: str) -> None:
         """Force-reload the given IOD from source, e.g. to pick up newly available section references."""

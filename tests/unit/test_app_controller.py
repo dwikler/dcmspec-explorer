@@ -77,7 +77,7 @@ _BOUND_METHOD_NAMES = [
     "_handle_iodmodel_error",
     "_on_details_link_clicked",
     "_on_explanation_link_clicked",
-    "_on_explanation_toggle_clicked",
+    "_on_explanation_close_clicked",
     "_on_section_link_clicked",
     "_handle_section_loaded",
     "_handle_section_error",
@@ -109,7 +109,6 @@ def make_controller_state(view, model, logger, favorites_manager=None, **overrid
         _current_relative_path=None,
         _current_section_refs=[],
         _explanation_loaded_section_id=None,
-        _explanation_has_content=False,
         _normalize_export_filename=AppController._normalize_export_filename,
         _relative_path_for_item=AppController._relative_path_for_item,
     )
@@ -418,9 +417,7 @@ class FakeView:
         self.export_menu_enabled_calls = []
         self.favorite_action_calls = []
         self.explanation_html_calls = []
-        self.explanation_toggle_calls = []
-        self.explanation_expanded_calls = []
-        self._explanation_expanded = False
+        self.explanation_visible_calls = []
 
     def set_details_html(self, html_body):
         """Record the call."""
@@ -481,23 +478,16 @@ class FakeView:
         self.favorite_action_calls.append((enabled, is_favorite))
 
     def set_explanation_html(self, html_body):
-        """Record the call and mark the drawer as expanded, as MainWindow does."""
+        """Record the call."""
         self.explanation_html_calls.append(html_body)
-        self._explanation_expanded = True
 
-    def show_explanation_toggle(self, visible):
-        """Record the call and reset to collapsed, as MainWindow does."""
-        self.explanation_toggle_calls.append(visible)
-        self._explanation_expanded = False
+    def show_explanation(self):
+        """Record the call."""
+        self.explanation_visible_calls.append(True)
 
-    def set_explanation_expanded(self, expanded):
-        """Record the call and update the tracked expanded state."""
-        self.explanation_expanded_calls.append(expanded)
-        self._explanation_expanded = expanded
-
-    def is_explanation_expanded(self):
-        """Return the tracked expanded state."""
-        return self._explanation_expanded
+    def hide_explanation(self):
+        """Record the call."""
+        self.explanation_visible_calls.append(False)
 
 
 class FakeQAction:
@@ -1082,10 +1072,10 @@ class TestHandleAttributeItemClicked:
         state._handle_attribute_item_clicked(details, "table_A.8-1")
 
         assert state._current_section_refs == ["sect_C.11.1.1"]
-        assert view.explanation_toggle_calls[-1] is True
+        assert view.explanation_visible_calls[-1] is False
 
-    def test_without_section_refs_hides_the_drawer_toggle(self, fake_logger):
-        """A details dict with no section references hides/collapses the drawer toggle."""
+    def test_without_section_refs_records_empty_list(self, fake_logger):
+        """A details dict with no section references records an empty ref list."""
         view = FakeView()
         state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
         details = {"elem_name": "X", "elem_tag": "", "elem_type": "1", "elem_description": "plain text"}
@@ -1093,24 +1083,27 @@ class TestHandleAttributeItemClicked:
         state._handle_attribute_item_clicked(details, "table_A.8-1")
 
         assert state._current_section_refs == []
-        assert view.explanation_toggle_calls[-1] is False
+        assert view.explanation_visible_calls[-1] is False
 
-    def test_selecting_a_new_attribute_resets_drawer_content_state(self, fake_logger):
-        """Selecting a new attribute clears any leftover loaded-section/has-content state."""
+    def test_selecting_a_new_attribute_hides_the_drawer_but_keeps_loaded_section_cached(self, fake_logger):
+        """Selecting a new attribute hides any open drawer, but keeps the loaded-section id cached.
+
+        Not resetting it lets reopening the same section stay instant (no refetch) if the newly
+        selected attribute happens to reference it too.
+        """
         view = FakeView()
         state = make_controller_state(
             view=view,
             model=FakeModel(),
             logger=fake_logger,
             _explanation_loaded_section_id="sect_C.1",
-            _explanation_has_content=True,
         )
         details = {"elem_name": "X", "elem_tag": "", "elem_type": "1", "elem_description": ""}
 
         state._handle_attribute_item_clicked(details, "table_A.8-1")
 
-        assert state._explanation_loaded_section_id is None
-        assert state._explanation_has_content is False
+        assert view.explanation_visible_calls[-1] is False
+        assert state._explanation_loaded_section_id == "sect_C.1"
 
 
 class TestOnTreeviewRightClick:
@@ -1830,7 +1823,7 @@ class TestOnDetailsLinkClicked:
         state._on_details_link_clicked(QUrl("#sect_C.1"))
 
         assert state.section_service.start_section_worker_calls == ["sect_C.1"]
-        assert view.explanation_toggle_calls[-1] is True
+        assert view.explanation_visible_calls[-1] is True
         assert view.anchor_warning_calls == []
         assert view.url_warning_calls == []
 
@@ -1860,7 +1853,7 @@ class TestOnDetailsLinkClicked:
         state._on_details_link_clicked(QUrl("#sect_C.1"))
 
         assert view.explanation_html_calls == []
-        assert view.explanation_toggle_calls == []
+        assert view.explanation_visible_calls == []
 
     def test_reload_scheme_url_starts_forced_iod_reload(self, fake_logger, monkeypatch):
         """A "reload:<table_id>" link starts a forced IOD model reload for that table_id."""
@@ -1928,12 +1921,11 @@ class TestOnSectionLinkClicked:
         state._on_section_link_clicked("sect_C.1")
 
         assert state.section_service.start_section_worker_calls == ["sect_C.1"]
-        assert view.explanation_toggle_calls[-1] is True
+        assert view.explanation_visible_calls[-1] is True
         assert "Loading" in view.explanation_html_calls[-1]
-        assert state._explanation_has_content is True
 
-    def test_already_loaded_section_just_expands_without_refetching(self, fake_logger):
-        """Re-clicking an already-loaded section's link just expands it, without a new fetch."""
+    def test_already_loaded_section_just_shows_it_without_refetching(self, fake_logger):
+        """Re-clicking an already-loaded section's link just shows it, without a new fetch."""
         view = FakeView()
         state = make_controller_state(
             view=view, model=FakeModel(), logger=fake_logger, _explanation_loaded_section_id="sect_C.1"
@@ -1942,7 +1934,7 @@ class TestOnSectionLinkClicked:
         state._on_section_link_clicked("sect_C.1")
 
         assert state.section_service.start_section_worker_calls == []
-        assert view.explanation_expanded_calls[-1] is True
+        assert view.explanation_visible_calls[-1] is True
 
 
 class TestHandleSectionLoaded:
@@ -1993,74 +1985,21 @@ class TestShowSectionUnavailable:
 
         state._show_section_unavailable()
 
-        assert view.explanation_toggle_calls[-1] is True
+        assert view.explanation_visible_calls[-1] is True
         assert 'href="reload:table_A.1-1"' in view.explanation_html_calls[-1]
-        assert state._explanation_has_content is True
 
 
-class TestOnExplanationToggleClicked:
-    """Tests for AppController._on_explanation_toggle_clicked."""
+class TestOnExplanationCloseClicked:
+    """Tests for AppController._on_explanation_close_clicked."""
 
-    def test_nothing_loaded_yet_loads_the_first_reference(self, fake_logger):
-        """With no section loaded yet, the toggle button loads the attribute's first reference."""
+    def test_hides_the_drawer(self, fake_logger):
+        """Clicking the drawer's close button hides it."""
         view = FakeView()
-        state = make_controller_state(
-            view=view, model=FakeModel(), logger=fake_logger, _current_section_refs=["sect_C.1", "sect_C.2"]
-        )
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
 
-        state._on_explanation_toggle_clicked()
+        state._on_explanation_close_clicked()
 
-        assert state.section_service.start_section_worker_calls == ["sect_C.1"]
-
-    def test_nothing_loaded_and_no_references_does_nothing(self, fake_logger):
-        """With no section loaded and no references at all, the toggle button does nothing."""
-        view = FakeView()
-        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger, _current_section_refs=[])
-
-        state._on_explanation_toggle_clicked()
-
-        assert state.section_service.start_section_worker_calls == []
-        assert view.explanation_expanded_calls == []
-
-    def test_already_loaded_toggles_expanded_state(self, fake_logger):
-        """Once a section is loaded, the toggle button just flips its expanded/collapsed state."""
-        view = FakeView()
-        view._explanation_expanded = True
-        state = make_controller_state(
-            view=view,
-            model=FakeModel(),
-            logger=fake_logger,
-            _explanation_loaded_section_id="sect_C.1",
-            _explanation_has_content=True,
-        )
-
-        state._on_explanation_toggle_clicked()
-
-        assert state.section_service.start_section_worker_calls == []
-        assert view.explanation_expanded_calls[-1] is False
-
-    def test_unavailable_message_shown_toggles_expanded_state_too(self, fake_logger):
-        """Toggling while the drawer shows the "not available, reload" message collapses/expands it.
-
-        Regression test: this message has no loaded section id, so the toggle must key off a
-        broader "has content" flag rather than _explanation_loaded_section_id, or clicking it
-        while this message is shown does nothing at all.
-        """
-        view = FakeView()
-        view._explanation_expanded = True
-        state = make_controller_state(
-            view=view,
-            model=FakeModel(),
-            logger=fake_logger,
-            _current_section_refs=[],
-            _explanation_loaded_section_id=None,
-            _explanation_has_content=True,
-        )
-
-        state._on_explanation_toggle_clicked()
-
-        assert state.section_service.start_section_worker_calls == []
-        assert view.explanation_expanded_calls[-1] is False
+        assert view.explanation_visible_calls[-1] is False
 
 
 class TestOnReloadIodLinkClicked:
@@ -2081,4 +2020,4 @@ class TestOnReloadIodLinkClicked:
         assert len(FakeLoadIODDialog.instances) == 1
         assert FakeLoadIODDialog.instances[0].shown is True
         assert iod_tree_view.set_enabled_calls == [False]
-        assert view.explanation_toggle_calls[-1] is False
+        assert view.explanation_visible_calls[-1] is False

@@ -4,7 +4,7 @@ import os
 from typing import List, Optional
 
 from PySide6.QtCore import Signal, QUrl, Qt, QModelIndex, QPoint
-from PySide6.QtGui import QFont, QStandardItemModel, QShowEvent, QFontDatabase, QIcon
+from PySide6.QtGui import QFont, QStandardItemModel, QShowEvent, QFontDatabase, QIcon, QPalette
 from PySide6.QtWidgets import QMainWindow, QApplication
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
@@ -40,7 +40,7 @@ class MainWindow(QMainWindow):
     file_menu_about_to_show = Signal()  # signal to refresh Export/favorite enabled state before display
     details_link_clicked = Signal(QUrl)  # signal for a link clicked in detailsTextBrowser
     explanation_link_clicked = Signal(QUrl)  # signal for a link clicked in explanationTextBrowser
-    explanation_toggle_clicked = Signal()  # signal for the explanatory section drawer's toggle button
+    explanation_close_clicked = Signal()  # signal for the explanatory section drawer's close button
 
     def __init__(self):
         """Initialize the main window using compiled UI from Qt Designer.
@@ -101,10 +101,22 @@ class MainWindow(QMainWindow):
         self.cached_icon = QIcon(cached_icon_path) if os.path.exists(cached_icon_path) else None
         uncached_icon_path = os.path.join(os.path.dirname(__file__), "..", "resources", "icons", "uncached.svg")
         self.uncached_icon = QIcon(uncached_icon_path) if os.path.exists(uncached_icon_path) else None
+        is_dark = self.palette().color(QPalette.ColorRole.Window).lightness() < 128
+        close_icon_name = "close-dark.svg" if is_dark else "close.svg"
+        close_icon_path = os.path.join(os.path.dirname(__file__), "..", "resources", "icons", close_icon_name)
+        if os.path.exists(close_icon_path):
+            self.ui.explanationCloseButton.setIcon(QIcon(close_icon_path))
+            self.ui.explanationCloseButton.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.ui.explanationCloseButton.setStyleSheet("""
+            QToolButton {
+                border: none;
+                background: transparent;
+            }
+        """)
 
         # The explanation drawer must never fully collapse away its toggle button, only its content
         self.ui.detailsSplitter.setCollapsible(1, False)
-        self.show_explanation_toggle(False)
+        self.hide_explanation()
 
         # Connect to UI widgets signals
         self.ui.iodTreeView.clicked.connect(self._on_treeview_item_clicked)
@@ -117,7 +129,7 @@ class MainWindow(QMainWindow):
         self.ui.actionExportXlsx.triggered.connect(self.export_xlsx_action_triggered)
         self.ui.detailsTextBrowser.anchorClicked.connect(self.details_link_clicked)
         self.ui.explanationTextBrowser.anchorClicked.connect(self.explanation_link_clicked)
-        self.ui.explanationToggleButton.clicked.connect(self.explanation_toggle_clicked)
+        self.ui.explanationCloseButton.clicked.connect(self.explanation_close_clicked)
         self.ui.actionExit.triggered.connect(self.close)
         self.ui.actionToggleFavorite.triggered.connect(self.toggle_favorite_state_action_triggered)
         self.ui.menuFile.aboutToShow.connect(self.file_menu_about_to_show)
@@ -164,33 +176,21 @@ class MainWindow(QMainWindow):
         self.ui.explanationTextBrowser.setSearchPaths(paths)
 
     def set_explanation_html(self, html_body: str) -> None:
-        """Set the HTML content of the explanatory section drawer and expand it."""
+        """Set the HTML content of the explanatory section drawer, without changing its visibility."""
         html = f"<style>{self.details_css}</style>\n{html_body}"
         self.ui.explanationTextBrowser.setHtml(html)
-        self.set_explanation_expanded(True)
 
-    def show_explanation_toggle(self, visible: bool) -> None:
-        """Show or hide the explanatory section drawer handle for the currently selected attribute."""
-        self.ui.explanationArea.setVisible(visible)
-        self.ui.explanationTextBrowser.setHtml("")
-        self.set_explanation_expanded(False)
-
-    def is_explanation_expanded(self) -> bool:
-        """Return whether the explanatory section drawer's content is currently expanded."""
-        return self.ui.explanationTextBrowser.isVisible()
-
-    def set_explanation_expanded(self, expanded: bool) -> None:
-        """Expand or collapse the explanatory section drawer, updating the toggle button's indicator."""
-        self.ui.explanationTextBrowser.setVisible(expanded)
-        arrow = "▾" if expanded else "▸"
-        self.ui.explanationToggleButton.setText(f"{arrow} Explanatory Section")
+    def show_explanation(self) -> None:
+        """Reveal the explanatory section drawer, giving it a share of the details pane."""
+        self.ui.explanationArea.setVisible(True)
         total = sum(self.ui.detailsSplitter.sizes()) or 1
-        if expanded:
-            self.ui.detailsSplitter.setSizes([total // 2, total // 2])
-        else:
-            # Collapse to exactly the toggle button's own height, so it stays visible and clickable.
-            handle_height = self.ui.explanationToggleButton.sizeHint().height()
-            self.ui.detailsSplitter.setSizes([max(total - handle_height, 0), handle_height])
+        self.ui.detailsSplitter.setSizes([total // 2, total // 2])
+
+    def hide_explanation(self) -> None:
+        """Hide the explanatory section drawer, without discarding its rendered content."""
+        self.ui.explanationArea.setVisible(False)
+        total = sum(self.ui.detailsSplitter.sizes()) or 1
+        self.ui.detailsSplitter.setSizes([total, 0])
 
     def showEvent(self, event: QShowEvent) -> None:
         """Override the Qt showEvent to emit a custom signal after the window is shown.

@@ -147,12 +147,26 @@ class Ui_MainWindow(object):
         self.explanationAreaLayout = QVBoxLayout(self.explanationArea)
         self.explanationAreaLayout.setObjectName(u"explanationAreaLayout")
         self.explanationAreaLayout.setContentsMargins(0, 0, 0, 0)
-        self.explanationToggleButton = QToolButton(self.explanationArea)
-        self.explanationToggleButton.setObjectName(u"explanationToggleButton")
-        self.explanationToggleButton.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-        self.explanationToggleButton.setAutoRaise(True)
+        self.explanationHeaderLayout = QHBoxLayout()
+        self.explanationHeaderLayout.setObjectName(u"explanationHeaderLayout")
+        self.explanationHeaderLabel = QLabel(self.explanationArea)
+        self.explanationHeaderLabel.setObjectName(u"explanationHeaderLabel")
 
-        self.explanationAreaLayout.addWidget(self.explanationToggleButton)
+        self.explanationHeaderLayout.addWidget(self.explanationHeaderLabel)
+
+        self.explanationHeaderSpacer = QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.explanationHeaderLayout.addItem(self.explanationHeaderSpacer)
+
+        self.explanationCloseButton = QToolButton(self.explanationArea)
+        self.explanationCloseButton.setObjectName(u"explanationCloseButton")
+        self.explanationCloseButton.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.explanationCloseButton.setAutoRaise(True)
+
+        self.explanationHeaderLayout.addWidget(self.explanationCloseButton)
+
+
+        self.explanationAreaLayout.addLayout(self.explanationHeaderLayout)
 
         self.explanationTextBrowser = QTextBrowser(self.explanationArea)
         self.explanationTextBrowser.setObjectName(u"explanationTextBrowser")
@@ -207,7 +221,8 @@ class Ui_MainWindow(object):
         self.checkForUpdatesPushButton.setText(QCoreApplication.translate("MainWindow", u"Check for Updates", None))
         self.iodLabel.setText(QCoreApplication.translate("MainWindow", u"IOD List", None))
         self.detailsLabel.setText(QCoreApplication.translate("MainWindow", u"Details", None))
-        self.explanationToggleButton.setText(QCoreApplication.translate("MainWindow", u"\u25b8 Explanatory Section", None))
+        self.explanationHeaderLabel.setText(QCoreApplication.translate("MainWindow", u"Explanatory Section", None))
+        self.explanationCloseButton.setText(QCoreApplication.translate("MainWindow", u"\u2715", None))
         self.menuFile.setTitle(QCoreApplication.translate("MainWindow", u"File", None))
         self.menuExport.setTitle(QCoreApplication.translate("MainWindow", u"Export", None))
     # retranslateUi

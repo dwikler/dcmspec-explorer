@@ -191,17 +191,35 @@
              <number>0</number>
             </property>
             <item>
-             <widget class="QToolButton" name="explanationToggleButton">
-              <property name="text">
-               <string>▸ Explanatory Section</string>
-              </property>
-              <property name="toolButtonStyle">
-               <enum>Qt::ToolButtonStyle::ToolButtonTextOnly</enum>
-              </property>
-              <property name="autoRaise">
-               <bool>true</bool>
-              </property>
-             </widget>
+             <layout class="QHBoxLayout" name="explanationHeaderLayout">
+              <item>
+               <widget class="QLabel" name="explanationHeaderLabel">
+                <property name="text">
+                 <string>Explanatory Section</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <spacer name="explanationHeaderSpacer">
+                <property name="orientation">
+                 <enum>Qt::Orientation::Horizontal</enum>
+                </property>
+               </spacer>
+              </item>
+              <item>
+               <widget class="QToolButton" name="explanationCloseButton">
+                <property name="text">
+                 <string>✕</string>
+                </property>
+                <property name="toolButtonStyle">
+                 <enum>Qt::ToolButtonStyle::ToolButtonTextOnly</enum>
+                </property>
+                <property name="autoRaise">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+             </layout>
             </item>
             <item>
              <widget class="QTextBrowser" name="explanationTextBrowser">
