@@ -1,7 +1,7 @@
 """Main Window View class for the DCMspec Explorer application."""
 
 import os
-from typing import Optional
+from typing import List, Optional
 
 from PySide6.QtCore import Signal, QUrl, Qt, QModelIndex, QPoint
 from PySide6.QtGui import QFont, QStandardItemModel, QShowEvent, QFontDatabase, QIcon
@@ -38,6 +38,9 @@ class MainWindow(QMainWindow):
     export_xlsx_action_triggered = Signal()  # signal for File > Export > Excel... menu action
     toggle_favorite_state_action_triggered = Signal()  # signal for File > Add/Remove Favorite menu action
     file_menu_about_to_show = Signal()  # signal to refresh Export/favorite enabled state before display
+    details_link_clicked = Signal(QUrl)  # signal for a link clicked in detailsTextBrowser
+    explanation_link_clicked = Signal(QUrl)  # signal for a link clicked in explanationTextBrowser
+    explanation_toggle_clicked = Signal()  # signal for the explanatory section drawer's toggle button
 
     def __init__(self):
         """Initialize the main window using compiled UI from Qt Designer.
@@ -99,6 +102,10 @@ class MainWindow(QMainWindow):
         uncached_icon_path = os.path.join(os.path.dirname(__file__), "..", "resources", "icons", "uncached.svg")
         self.uncached_icon = QIcon(uncached_icon_path) if os.path.exists(uncached_icon_path) else None
 
+        # The explanation drawer must never fully collapse away its toggle button, only its content
+        self.ui.detailsSplitter.setCollapsible(1, False)
+        self.show_explanation_toggle(False)
+
         # Connect to UI widgets signals
         self.ui.iodTreeView.clicked.connect(self._on_treeview_item_clicked)
         self.ui.iodTreeView.customContextMenuRequested.connect(self._on_treeview_right_click)
@@ -108,6 +115,9 @@ class MainWindow(QMainWindow):
         self.ui.checkForUpdatesPushButton.clicked.connect(self._on_check_for_updates_clicked)
         self.ui.actionExportCsv.triggered.connect(self.export_csv_action_triggered)
         self.ui.actionExportXlsx.triggered.connect(self.export_xlsx_action_triggered)
+        self.ui.detailsTextBrowser.anchorClicked.connect(self.details_link_clicked)
+        self.ui.explanationTextBrowser.anchorClicked.connect(self.explanation_link_clicked)
+        self.ui.explanationToggleButton.clicked.connect(self.explanation_toggle_clicked)
         self.ui.actionExit.triggered.connect(self.close)
         self.ui.actionToggleFavorite.triggered.connect(self.toggle_favorite_state_action_triggered)
         self.ui.menuFile.aboutToShow.connect(self.file_menu_about_to_show)
@@ -148,6 +158,35 @@ class MainWindow(QMainWindow):
         item_name = selected_item_name.text() if selected_item_name else "Unknown"
         html = f"<h1>{item_name} {kind}</h1><p>No details available.</p>"
         self.set_details_html(html)
+
+    def set_explanation_image_search_paths(self, paths: List[str]) -> None:
+        """Set the search-path list of the explanationTextBrowser so images are found."""
+        self.ui.explanationTextBrowser.setSearchPaths(paths)
+
+    def set_explanation_html(self, html_body: str) -> None:
+        """Set the HTML content of the explanatory section drawer and expand it."""
+        html = f"<style>{self.details_css}</style>\n{html_body}"
+        self.ui.explanationTextBrowser.setHtml(html)
+        self.set_explanation_expanded(True)
+
+    def show_explanation_toggle(self, visible: bool) -> None:
+        """Show or hide the explanatory section drawer handle for the currently selected attribute."""
+        self.ui.explanationArea.setVisible(visible)
+        self.ui.explanationTextBrowser.setHtml("")
+        self.set_explanation_expanded(False)
+
+    def set_explanation_expanded(self, expanded: bool) -> None:
+        """Expand or collapse the explanatory section drawer, updating the toggle button's indicator."""
+        self.ui.explanationTextBrowser.setVisible(expanded)
+        arrow = "▾" if expanded else "▸"
+        self.ui.explanationToggleButton.setText(f"{arrow} Explanatory Section")
+        total = sum(self.ui.detailsSplitter.sizes()) or 1
+        if expanded:
+            self.ui.detailsSplitter.setSizes([total // 2, total // 2])
+        else:
+            # Collapse to exactly the toggle button's own height, so it stays visible and clickable.
+            handle_height = self.ui.explanationToggleButton.sizeHint().height()
+            self.ui.detailsSplitter.setSizes([max(total - handle_height, 0), handle_height])
 
     def showEvent(self, event: QShowEvent) -> None:
         """Override the Qt showEvent to emit a custom signal after the window is shown.
