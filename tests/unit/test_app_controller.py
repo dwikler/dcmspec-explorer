@@ -1941,14 +1941,17 @@ class TestHandleSectionLoaded:
     """Tests for AppController._handle_section_loaded."""
 
     def test_renders_section_html_and_records_loaded_section_id(self, fake_logger):
-        """A successfully loaded section's content.html is rendered and its id remembered."""
+        """A successfully loaded section's title and content.html are rendered and its id remembered."""
         view = FakeView()
         state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
-        section_model = types.SimpleNamespace(content=types.SimpleNamespace(html="<p>Section content</p>"))
+        section_model = types.SimpleNamespace(
+            metadata=types.SimpleNamespace(title="Section Title"),
+            content=types.SimpleNamespace(html="<p>Section content</p>"),
+        )
 
         state._handle_section_loaded(state.section_service, section_model, "sect_C.1")
 
-        assert view.explanation_html_calls[-1] == "<p>Section content</p>"
+        assert view.explanation_html_calls[-1] == "<h1>Section Title</h1><p>Section content</p>"
         assert state._explanation_loaded_section_id == "sect_C.1"
 
 
