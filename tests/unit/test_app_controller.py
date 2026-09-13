@@ -295,6 +295,9 @@ class FakeSelectionModel:
         """Return the configured current index."""
         return self._current_index
 
+    def blockSignals(self, blocked):
+        """No-op, matching QItemSelectionModel's signature."""
+
 
 class FakeTreeViewHeader:
     """Fake treeview header exposing only setSortIndicatorShown."""

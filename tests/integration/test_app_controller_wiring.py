@@ -44,7 +44,7 @@ def prevent_real_background_loads(monkeypatch):
     def fake_start_iodlist_worker(self, force_download=False):
         return (None, None)
 
-    def fake_start_iodmodel_worker(self, table_id):
+    def fake_start_iodmodel_worker(self, table_id, force_rebuild=False):
         return (None, None)
 
     monkeypatch.setattr(IODListLoaderServiceMediator, "start_iodlist_worker", fake_start_iodlist_worker)
