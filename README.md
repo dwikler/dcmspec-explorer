@@ -96,3 +96,7 @@ Icons from:
 - Wolf Kit Solid Glyph Icons Collection by [Thewolfkit](https://www.svgrepo.com/collection/wolf-kit-solid-glyph-icons/),
 via [SVG Repo](https://www.svgrepo.com/), licensed under
 [CC Attribution](https://creativecommons.org/licenses/by/4.0/). Recolored and resized.
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
