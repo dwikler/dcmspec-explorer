@@ -30,9 +30,9 @@ class FakeModel:
         self.load_iod_list_calls.append((force_download, progress_observer))
         return self._result(self.iod_list)
 
-    def load_iod_model(self, table_id, logger, progress_observer):
+    def load_iod_model(self, table_id, logger, progress_observer, force_rebuild=False):
         """Record the call and return iod_model, or raise the canned error."""
-        self.load_iod_model_calls.append((table_id, logger, progress_observer))
+        self.load_iod_model_calls.append((table_id, logger, progress_observer, force_rebuild))
         return self._result(self.iod_model)
 
     def _result(self, value):
@@ -97,11 +97,24 @@ class TestIODModelLoaderWorker:
 
         assert event_queue.get_nowait() == ("loaded", "some_spec_model")
         assert len(model.load_iod_model_calls) == 1
-        table_id, logger, progress_observer = model.load_iod_model_calls[0]
+        table_id, logger, progress_observer, force_rebuild = model.load_iod_model_calls[0]
         assert table_id == "table_A.2-1"
         assert logger is fake_logger
         assert isinstance(progress_observer, ServiceProgressObserver)
         assert progress_observer.event_queue is event_queue
+        assert force_rebuild is False
+
+    def test_force_rebuild_is_forwarded_to_load_iod_model(self, fake_logger):
+        """The worker's force_rebuild flag is passed through to Model.load_iod_model."""
+        event_queue = queue.Queue()
+        model = FakeModel(iod_model="some_spec_model")
+        worker = IODModelLoaderWorker(
+            model=model, table_id="table_A.2-1", logger=fake_logger, event_queue=event_queue, force_rebuild=True
+        )
+
+        worker.run()
+
+        assert model.load_iod_model_calls[0][3] is True
 
     def test_exception_puts_error_event(self, fake_logger):
         """When load_iod_model raises, ("error", <message>) is put on the queue instead."""

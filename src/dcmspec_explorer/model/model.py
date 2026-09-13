@@ -14,7 +14,11 @@ from bs4 import BeautifulSoup
 from dcmspec.config import Config
 from dcmspec.xhtml_doc_handler import XHTMLDocHandler
 from dcmspec.dom_table_spec_parser import DOMTableSpecParser
+from dcmspec.dom_section_spec_parser import DOMSectionSpecParser
 from dcmspec.iod_spec_builder import IODSpecBuilder
+from dcmspec.module_spec_builder import ModuleSpecBuilder
+from dcmspec.section_image_resolver import SectionImageResolver
+from dcmspec.section_registry import SectionRegistry
 from dcmspec.spec_factory import SpecFactory
 from dcmspec.spec_model import SpecModel
 
@@ -56,6 +60,8 @@ class Model:
     Attributes:
         _iod_entries: Dictionary mapping table_id to IODEntry objects for fast lookup.
         _iod_specmodels: Dictionary mapping table_id to loaded SpecModel instances.
+        _section_specmodels: Dictionary mapping section_id to loaded explanatory section SpecModel
+            instances, shared across all IODs/modules since sections are identified globally.
 
     """
 
@@ -83,6 +89,8 @@ class Model:
         # Initialize the IOD entries and spec models dictionaries
         self._iod_entries: dict[str, IODEntry] = {}  # Dict mapping table_id to IODEntry objects
         self._iod_specmodels: dict[str, SpecModel] = {}  # Dict mapping table_id to loaded SpecModel instances
+        # Dict mapping section_id to loaded explanatory section SpecModel instances, shared across IODs/modules
+        self._section_specmodels = SectionRegistry()
 
     @property
     def iod_list(self) -> List[IODEntry]:
@@ -157,6 +165,7 @@ class Model:
                 self._archive_previous_version_cache()
                 # Clear in-memory IOD models so they are reloaded from the new standard
                 self._iod_specmodels.clear()
+                self._section_specmodels.clear()
 
             # Step 7: If a temp file was used, move it to the canonical location after archiving/version handling
             if force_download and temp_file_path:
@@ -174,7 +183,11 @@ class Model:
         return iod_entry_list
 
     def load_iod_model(
-        self, table_id: str, logger: logging.Logger, progress_observer: Optional[ServiceProgressObserver] = None
+        self,
+        table_id: str,
+        logger: logging.Logger,
+        progress_observer: Optional[ServiceProgressObserver] = None,
+        force_rebuild: bool = False,
     ) -> Any:
         """Load the IOD model for the given table_id using the IODSpecBuilder API.
 
@@ -188,6 +201,10 @@ class Model:
             table_id (str): The table identifier (e.g., "table_A.49-1")
             logger (logging.Logger): Logger instance for progress tracking and debugging
             progress_observer (ServiceProgressObserver): A progress observer to report progress.
+            force_rebuild (bool): If True, ignore the in-memory and on-disk cache and rebuild the
+                model from a fresh download, overwriting the cached JSON. Used in case of parser
+                changes (e.g. newly available explanatory section references) for an IOD that was
+                previously cached.
 
         Returns:
             IOD model object with content attribute containing the AnyTree structure,
@@ -195,7 +212,7 @@ class Model:
 
         """
         # Return in-memory model if already loaded
-        if table_id in self.iod_specmodels:
+        if not force_rebuild and table_id in self.iod_specmodels:
             return self.iod_specmodels[table_id]
 
         # Define Part 3 URL and file names
@@ -228,6 +245,8 @@ class Model:
         # Set skip_columns to elem_type column if IOD is normalized (no Type column)
         if not composite_iod:
             parser_kwargs["skip_columns"] = [2]
+        # Scan elem_description (column 3) for "See Section X" references to explanatory sections
+        parser_kwargs["ref_columns"] = [3]
         module_factory = SpecFactory(
             column_to_attr={0: "elem_name", 1: "elem_tag", 2: "elem_type", 3: "elem_description"},
             name_attr="elem_name",
@@ -236,10 +255,32 @@ class Model:
             logger=logger,
         )
 
+        # A forced reload needs a ModuleSpecBuilder to bypass a stale per-module JSON cache: without
+        # one, IODSpecBuilder loads an already-existing module cache file as-is, ignoring both
+        # force_download and whether it predates ref_columns -- ModuleSpecBuilder instead routes
+        # through SpecFactory.build_model, whose own cache check detects that mismatch and reparses.
+        # This also eagerly resolves that module's sections, an acceptable cost for this explicit,
+        # user-initiated reload (normal, lazy loads never do this).
+        module_builder = None
+        if force_rebuild:
+            section_factory = SpecFactory(
+                table_parser=DOMSectionSpecParser(logger=logger),
+                config=self.config,
+                logger=logger,
+            )
+            module_builder = ModuleSpecBuilder(
+                module_factory=module_factory,
+                section_factory=section_factory,
+                section_registry=self._section_specmodels,
+                ref_columns=[3],
+                logger=logger,
+            )
+
         # Create the builder
         builder = IODSpecBuilder(
             iod_factory=iod_factory,
             module_factory=module_factory,
+            module_builder=module_builder,
             logger=logger,
         )
 
@@ -250,7 +291,7 @@ class Model:
                 cache_file_name=cache_file_name,
                 json_file_name=model_file_name,
                 table_id=table_id,
-                force_download=False,
+                force_download=force_rebuild,
                 progress_observer=progress_observer,
             )
         except ValueError as ve:
@@ -328,6 +369,54 @@ class Model:
         if node:
             return {k: v for k, v in node.__dict__.items() if not k.startswith("_")}
         return None
+
+    def get_or_load_section(self, section_id: str, logger: logging.Logger) -> SpecModel:
+        """Return the SpecModel for a referenced explanatory section, loading and caching it if needed.
+
+        Sections are identified globally by section_id (e.g. "sect_C.7.6.16.2.1.1") and shared
+        across all IODs/modules via the in-memory section registry and an on-disk JSON cache
+        under "cache/model/sections/".
+
+        No progress_observer parameter: by the time this runs the standard page is already
+        cached, and dcmspec reports no progress for parsing a section or downloading its images.
+
+        Args:
+            section_id (str): The section's anchor id.
+            logger (logging.Logger): Logger instance for progress tracking and debugging.
+
+        Returns:
+            SpecModel: The explanatory section's model.
+
+        """
+        if section_id in self._section_specmodels:
+            return self._section_specmodels[section_id]
+
+        section_factory = SpecFactory(
+            table_parser=DOMSectionSpecParser(logger=logger),
+            config=self.config,
+            logger=logger,
+        )
+        # create_model is preferred to load_document then build_model as it checks the per-section
+        # JSON cache before loading/parsing the standard page.
+        section_model = section_factory.create_model(
+            url=self.PART3_XHTML_URL,
+            cache_file_name=self.PART3_XHTML_CACHE_FILE_NAME,
+            table_id=section_id,
+            force_download=False,
+            json_file_name=f"sections/{section_id}.json",
+        )
+
+        # The image files themselves are cached under standard/figures/, but the image_paths
+        # list isn't saved in the section's JSON cache, so it must be recomputed on every load.
+        image_resolver = SectionImageResolver(
+            doc_handler=self.doc_handler,
+            cache_dir=self.config.get_param("cache_dir"),
+            logger=logger,
+        )
+        image_resolver.resolve(section_model, self.PART3_XHTML_URL)
+
+        self._section_specmodels[section_id] = section_model
+        return section_model
 
     def get_module_ref_link(self, ref_value: str) -> str:
         """Return formatted HTML anchor for the module reference, or escaped plain text if not available or unsafe."""

@@ -93,6 +93,6 @@ The list of your favorite IODs is stored in a file named `favorites.json` in the
 ## Credits
 
 Icons from:
-- Wolf Kit Solid Glyph Icons Collection by [Thewolfkit](https://www.figma.com/@thewolfkit?ref=svgrepo.com),
+- Wolf Kit Solid Glyph Icons Collection by [Thewolfkit](https://www.svgrepo.com/collection/wolf-kit-solid-glyph-icons/),
 via [SVG Repo](https://www.svgrepo.com/), licensed under
 [CC Attribution](https://creativecommons.org/licenses/by/4.0/). Recolored and resized.

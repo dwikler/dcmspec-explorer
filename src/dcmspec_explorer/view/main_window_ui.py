@@ -19,8 +19,8 @@ from PySide6.QtGui import (QAction, QBrush, QColor, QConicalGradient,
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QHBoxLayout, QHeaderView,
     QLabel, QLineEdit, QMainWindow, QMenu,
     QMenuBar, QPushButton, QSizePolicy, QSpacerItem,
-    QSplitter, QStatusBar, QTextBrowser, QTreeView,
-    QVBoxLayout, QWidget)
+    QSplitter, QStatusBar, QTextBrowser, QToolButton,
+    QTreeView, QVBoxLayout, QWidget)
 
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
@@ -134,12 +134,50 @@ class Ui_MainWindow(object):
 
         self.verticalLayout_2.addWidget(self.detailsLabel)
 
-        self.detailsTextBrowser = QTextBrowser(self.detailsArea)
+        self.detailsSplitter = QSplitter(self.detailsArea)
+        self.detailsSplitter.setObjectName(u"detailsSplitter")
+        self.detailsSplitter.setOrientation(Qt.Orientation.Vertical)
+        self.detailsTextBrowser = QTextBrowser(self.detailsSplitter)
         self.detailsTextBrowser.setObjectName(u"detailsTextBrowser")
         self.detailsTextBrowser.setOpenExternalLinks(False)
         self.detailsTextBrowser.setOpenLinks(False)
+        self.detailsSplitter.addWidget(self.detailsTextBrowser)
+        self.explanationArea = QWidget(self.detailsSplitter)
+        self.explanationArea.setObjectName(u"explanationArea")
+        self.explanationAreaLayout = QVBoxLayout(self.explanationArea)
+        self.explanationAreaLayout.setObjectName(u"explanationAreaLayout")
+        self.explanationAreaLayout.setContentsMargins(0, 0, 0, 0)
+        self.explanationHeaderLayout = QHBoxLayout()
+        self.explanationHeaderLayout.setObjectName(u"explanationHeaderLayout")
+        self.explanationHeaderLabel = QLabel(self.explanationArea)
+        self.explanationHeaderLabel.setObjectName(u"explanationHeaderLabel")
 
-        self.verticalLayout_2.addWidget(self.detailsTextBrowser)
+        self.explanationHeaderLayout.addWidget(self.explanationHeaderLabel)
+
+        self.explanationHeaderSpacer = QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.explanationHeaderLayout.addItem(self.explanationHeaderSpacer)
+
+        self.explanationCloseButton = QToolButton(self.explanationArea)
+        self.explanationCloseButton.setObjectName(u"explanationCloseButton")
+        self.explanationCloseButton.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.explanationCloseButton.setAutoRaise(True)
+
+        self.explanationHeaderLayout.addWidget(self.explanationCloseButton)
+
+
+        self.explanationAreaLayout.addLayout(self.explanationHeaderLayout)
+
+        self.explanationTextBrowser = QTextBrowser(self.explanationArea)
+        self.explanationTextBrowser.setObjectName(u"explanationTextBrowser")
+        self.explanationTextBrowser.setOpenExternalLinks(False)
+        self.explanationTextBrowser.setOpenLinks(False)
+
+        self.explanationAreaLayout.addWidget(self.explanationTextBrowser)
+
+        self.detailsSplitter.addWidget(self.explanationArea)
+
+        self.verticalLayout_2.addWidget(self.detailsSplitter)
 
         self.splitter.addWidget(self.detailsArea)
 
@@ -183,6 +221,8 @@ class Ui_MainWindow(object):
         self.checkForUpdatesPushButton.setText(QCoreApplication.translate("MainWindow", u"Check for Updates", None))
         self.iodLabel.setText(QCoreApplication.translate("MainWindow", u"IOD List", None))
         self.detailsLabel.setText(QCoreApplication.translate("MainWindow", u"Details", None))
+        self.explanationHeaderLabel.setText(QCoreApplication.translate("MainWindow", u"Explanatory Section", None))
+        self.explanationCloseButton.setText(QCoreApplication.translate("MainWindow", u"\u2715", None))
         self.menuFile.setTitle(QCoreApplication.translate("MainWindow", u"File", None))
         self.menuExport.setTitle(QCoreApplication.translate("MainWindow", u"Export", None))
     # retranslateUi
