@@ -140,6 +140,7 @@ class AppController(QObject):
         self._current_relative_path: Optional[str] = None
         self._current_section_refs: List[str] = []
         self._explanation_loaded_section_id: Optional[str] = None
+        self._explanation_requested_section_id: Optional[str] = None
 
     def run(self) -> None:
         """Show the main application window and start the user interface."""
@@ -649,12 +650,15 @@ class AppController(QObject):
         self.view.show_explanation()
         self.view.set_explanation_html("<p><em>Loading explanatory section&hellip;</em></p>")
 
+        self._explanation_requested_section_id = section_id
         self._section_worker, self._section_thread = self.section_service.start_section_worker(section_id)
 
         self._safe_disconnect(
             self.section_service.section_loaded_signal,
             self.section_service.section_error_signal,
         )
+        # Inject section_id into the handler call: the signal itself doesn't carry it, but the
+        # handler needs it to detect a result superseded by a later click
         self.section_service.section_loaded_signal.connect(
             lambda sender, section_model, section_id=section_id: self._handle_section_loaded(
                 sender, section_model, section_id
@@ -662,18 +666,31 @@ class AppController(QObject):
             Qt.ConnectionType.QueuedConnection,
         )
         self.section_service.section_error_signal.connect(
-            self._handle_section_error, Qt.ConnectionType.QueuedConnection
+            lambda sender, message, section_id=section_id: self._handle_section_error(sender, message, section_id),
+            Qt.ConnectionType.QueuedConnection,
         )
 
     def _handle_section_loaded(self, sender: object, section_model: Any, section_id: str) -> None:
-        """Render a successfully loaded explanatory section's HTML in the drawer."""
+        """Render a successfully loaded explanatory section's HTML in the drawer.
+
+        Ignored if the drawer has since moved on to a different section (e.g. the user clicked
+        another attribute's reference before this one finished loading).
+        """
+        if section_id != self._explanation_requested_section_id:
+            return
         self._explanation_loaded_section_id = section_id
         section_html = getattr(section_model.content, "html", "")
         title_html = f"<h1>{html.escape(section_model.metadata.title)}</h1>"
         self.view.set_explanation_html(title_html + section_html)
 
-    def _handle_section_error(self, sender: object, message: str) -> None:
-        """Show an explanatory section load failure inline in the drawer, not as a modal dialog."""
+    def _handle_section_error(self, sender: object, message: str, section_id: str) -> None:
+        """Show an explanatory section load failure inline in the drawer, not as a modal dialog.
+
+        Ignored if the drawer has since moved on to a different section (e.g. the user clicked
+        another attribute's reference before this one failed).
+        """
+        if section_id != self._explanation_requested_section_id:
+            return
         self.logger.error(f"Error signal received from {sender}: {message}")
         self.view.set_explanation_html(f"<p>Could not load this explanatory section: {html.escape(message)}</p>")
 

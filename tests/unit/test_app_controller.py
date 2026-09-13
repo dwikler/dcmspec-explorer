@@ -109,6 +109,7 @@ def make_controller_state(view, model, logger, favorites_manager=None, **overrid
         _current_relative_path=None,
         _current_section_refs=[],
         _explanation_loaded_section_id=None,
+        _explanation_requested_section_id=None,
         _normalize_export_filename=AppController._normalize_export_filename,
         _relative_path_for_item=AppController._relative_path_for_item,
     )
@@ -1923,6 +1924,7 @@ class TestOnSectionLinkClicked:
         assert state.section_service.start_section_worker_calls == ["sect_C.1"]
         assert view.explanation_visible_calls[-1] is True
         assert "Loading" in view.explanation_html_calls[-1]
+        assert state._explanation_requested_section_id == "sect_C.1"
 
     def test_already_loaded_section_just_shows_it_without_refetching(self, fake_logger):
         """Re-clicking an already-loaded section's link just shows it, without a new fetch."""
@@ -1943,7 +1945,9 @@ class TestHandleSectionLoaded:
     def test_renders_section_html_and_records_loaded_section_id(self, fake_logger):
         """A successfully loaded section's title and content.html are rendered and its id remembered."""
         view = FakeView()
-        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+        state = make_controller_state(
+            view=view, model=FakeModel(), logger=fake_logger, _explanation_requested_section_id="sect_C.1"
+        )
         section_model = types.SimpleNamespace(
             metadata=types.SimpleNamespace(title="Section Title"),
             content=types.SimpleNamespace(html="<p>Section content</p>"),
@@ -1954,6 +1958,22 @@ class TestHandleSectionLoaded:
         assert view.explanation_html_calls[-1] == "<h1>Section Title</h1><p>Section content</p>"
         assert state._explanation_loaded_section_id == "sect_C.1"
 
+    def test_ignores_a_result_for_a_section_no_longer_requested(self, fake_logger):
+        """A stale result for a section superseded by a later click is not applied to the drawer."""
+        view = FakeView()
+        state = make_controller_state(
+            view=view, model=FakeModel(), logger=fake_logger, _explanation_requested_section_id="sect_C.2"
+        )
+        section_model = types.SimpleNamespace(
+            metadata=types.SimpleNamespace(title="Section Title"),
+            content=types.SimpleNamespace(html="<p>Section content</p>"),
+        )
+
+        state._handle_section_loaded(state.section_service, section_model, "sect_C.1")
+
+        assert view.explanation_html_calls == []
+        assert state._explanation_loaded_section_id is None
+
 
 class TestHandleSectionError:
     """Tests for AppController._handle_section_error."""
@@ -1961,12 +1981,25 @@ class TestHandleSectionError:
     def test_renders_error_inline_in_drawer_not_as_a_dialog(self, fake_logger):
         """A section load failure is shown inline in the drawer, not as a modal error dialog."""
         view = FakeView()
-        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+        state = make_controller_state(
+            view=view, model=FakeModel(), logger=fake_logger, _explanation_requested_section_id="sect_C.1"
+        )
 
-        state._handle_section_error(state.section_service, "boom")
+        state._handle_section_error(state.section_service, "boom", "sect_C.1")
 
         assert "boom" in view.explanation_html_calls[-1]
         assert view.error_calls == []
+
+    def test_ignores_an_error_for_a_section_no_longer_requested(self, fake_logger):
+        """A stale error for a section superseded by a later click is not applied to the drawer."""
+        view = FakeView()
+        state = make_controller_state(
+            view=view, model=FakeModel(), logger=fake_logger, _explanation_requested_section_id="sect_C.2"
+        )
+
+        state._handle_section_error(state.section_service, "boom", "sect_C.1")
+
+        assert view.explanation_html_calls == []
 
 
 class TestShowSectionUnavailable:
