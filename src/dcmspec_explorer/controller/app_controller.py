@@ -669,7 +669,8 @@ class AppController(QObject):
         """Render a successfully loaded explanatory section's HTML in the drawer."""
         self._explanation_loaded_section_id = section_id
         section_html = getattr(section_model.content, "html", "")
-        self.view.set_explanation_html(section_html)
+        title_html = f"<h1>{html.escape(section_model.metadata.title)}</h1>"
+        self.view.set_explanation_html(title_html + section_html)
 
     def _handle_section_error(self, sender: object, message: str) -> None:
         """Show an explanatory section load failure inline in the drawer, not as a modal dialog."""
