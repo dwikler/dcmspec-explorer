@@ -744,11 +744,18 @@ class AppController(QObject):
 
         self.view.update_treeview(qt_tree_model)
 
-        # Restore selection if possible
+        # Restore selection if possible, without re-triggering item-selection handling (e.g.
+        # reloading the details panel or closing an open explanation drawer) for a selection
+        # that, from the user's perspective, never actually changed.
         if selected_row is not None:
             item = qt_tree_model.item(selected_row, 0)
             index = qt_tree_model.indexFromItem(item)
-            self.view.ui.iodTreeView.setCurrentIndex(index)
+            restored_selection_model = self.view.ui.iodTreeView.selectionModel()
+            restored_selection_model.blockSignals(True)
+            try:
+                self.view.ui.iodTreeView.setCurrentIndex(index)
+            finally:
+                restored_selection_model.blockSignals(False)
 
     def _on_treeview_header_clicked(self, logical_index: int) -> None:
         """Handle clicks on the treeview column headers for sorting."""

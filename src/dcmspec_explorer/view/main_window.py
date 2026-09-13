@@ -151,7 +151,6 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         """Connect UI widget signals to their handlers."""
         header = self.ui.iodTreeView.header()
-        self.ui.iodTreeView.clicked.connect(self._on_treeview_item_clicked)
         self.ui.iodTreeView.customContextMenuRequested.connect(self._on_treeview_right_click)
         self.ui.searchLineEdit.textChanged.connect(self._on_search_text_changed)
         header.sectionClicked.connect(self._on_treeview_header_clicked)
@@ -236,14 +235,18 @@ class MainWindow(QMainWindow):
         # Emit a custom signal to notify that the window has been shown.
         self.window_shown.emit()
 
-    def _on_treeview_item_clicked(self, index: QModelIndex) -> None:
-        """Emit a custom signal when a treeview item is clicked.
+    def _on_treeview_current_item_changed(self, current: QModelIndex, previous: QModelIndex) -> None:
+        """Emit a custom signal when the treeview's current item changes.
+
+        Covers both mouse clicks and keyboard (arrow key) navigation, since both move the
+        treeview's current index.
 
         Args:
-            index: The index of the clicked item.
+            current: The newly current item's index.
+            previous: The index that was current before this change (unused).
 
         """
-        self.iod_treeview_item_selected.emit(index)
+        self.iod_treeview_item_selected.emit(current)
 
     def _on_treeview_header_clicked(self, logical_index: int) -> None:
         """Emit a custom signal when a treeview header is clicked.
@@ -297,6 +300,8 @@ class MainWindow(QMainWindow):
         column_widths = [header.sectionSize(i) for i in range(header.count())]
 
         self.ui.iodTreeView.setModel(tree_model)
+        # setModel() replaces the selection model, so the current-item connection must be redone.
+        self.ui.iodTreeView.selectionModel().currentChanged.connect(self._on_treeview_current_item_changed)
 
         if is_first_load:
             self.ui.iodTreeView.setColumnWidth(self.COL_NAME, 400)
