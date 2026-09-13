@@ -396,15 +396,13 @@ class Model:
             config=self.config,
             logger=logger,
         )
-        dom = section_factory.load_document(
+        # create_model is preferred to load_document then build_model as it checks the per-section
+        # JSON cache before loading/parsing the standard page.
+        section_model = section_factory.create_model(
             url=self.PART3_XHTML_URL,
             cache_file_name=self.PART3_XHTML_CACHE_FILE_NAME,
-            force_download=False,
-        )
-        section_model = section_factory.build_model(
-            doc_object=dom,
             table_id=section_id,
-            url=self.PART3_XHTML_URL,
+            force_download=False,
             json_file_name=f"sections/{section_id}.json",
         )
 

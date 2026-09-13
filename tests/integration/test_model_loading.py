@@ -246,18 +246,15 @@ class TestGetOrLoadSection:
     def test_success_builds_resolves_images_and_caches_the_section(self, model, monkeypatch, fake_logger):
         """A fresh section is built via SpecFactory, has its images resolved, and is cached in the registry."""
         built = _make_specmodel()
-        build_model_calls = []
+        create_model_calls = []
         resolve_calls = []
 
         class FakeSectionFactory:
             def __init__(self, **kwargs):
                 self.input_handler = object()
 
-            def load_document(self, **kwargs):
-                return "fake-dom"
-
-            def build_model(self, **kwargs):
-                build_model_calls.append(kwargs)
+            def create_model(self, **kwargs):
+                create_model_calls.append(kwargs)
                 return built
 
         class FakeImageResolver:
@@ -275,5 +272,5 @@ class TestGetOrLoadSection:
         assert result is built
         assert model._section_specmodels["sect_C.7.6.16.2.1.1"] is built
         assert resolve_calls == [(built, model.PART3_XHTML_URL)]
-        assert build_model_calls[0]["table_id"] == "sect_C.7.6.16.2.1.1"
-        assert build_model_calls[0]["json_file_name"] == "sections/sect_C.7.6.16.2.1.1.json"
+        assert create_model_calls[0]["table_id"] == "sect_C.7.6.16.2.1.1"
+        assert create_model_calls[0]["json_file_name"] == "sections/sect_C.7.6.16.2.1.1.json"
