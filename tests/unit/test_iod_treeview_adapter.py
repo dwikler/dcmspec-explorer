@@ -6,7 +6,13 @@ from PySide6.QtGui import QStandardItem, QIcon, QPixmap, QColor
 
 from dcmspec_explorer.controller.iod_treeview_adapter import IODTreeViewModelAdapter, COLUMN_INDEX
 from dcmspec_explorer.model.model import IODEntry
-from dcmspec_explorer.qt.qt_roles import TABLE_ID_ROLE, TABLE_URL_ROLE, NODE_PATH_ROLE, IS_FAVORITE_ROLE
+from dcmspec_explorer.qt.qt_roles import (
+    TABLE_ID_ROLE,
+    TABLE_URL_ROLE,
+    NODE_PATH_ROLE,
+    IS_FAVORITE_ROLE,
+    IS_PLACEHOLDER_ROLE,
+)
 
 
 def _plain_standard_item():
@@ -251,6 +257,40 @@ class TestBuildTreeviewModelTopLevelRows:
         assert name_item.data(TABLE_URL_ROLE) == "http://example.com/a"
         assert kind_item.data(TABLE_ID_ROLE) is None
 
+    def test_top_level_item_gets_a_placeholder_child(self):
+        """Every top-level item gets one placeholder child, so its disclosure arrow shows up front."""
+        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
+        adapter = IODTreeViewModelAdapter()
+
+        model = adapter.populate_treeview_model_top_level([entry])
+
+        name_item = model.item(0, COLUMN_INDEX["name"])
+        assert name_item.rowCount() == 1
+        assert name_item.child(0, 0).data(IS_PLACEHOLDER_ROLE) is True
+
+
+class TestHasPlaceholderChild:
+    """Tests for IODTreeViewModelAdapter.has_placeholder_child."""
+
+    def test_true_for_freshly_built_top_level_item(self):
+        """A freshly built top-level item (only its placeholder child) reports True."""
+        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
+        model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
+
+        assert IODTreeViewModelAdapter.has_placeholder_child(model.item(0, 0)) is True
+
+    def test_false_once_real_content_has_replaced_the_placeholder(self):
+        """An item whose placeholder was replaced by real content reports False."""
+        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
+        model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
+        content = Node("content")
+        module = Node("PatientModule", parent=content)
+        module.module = "Patient"
+        module.usage = "Mandatory"
+        IODTreeViewModelAdapter.populate_treeview_model_item(model.item(0, 0), content)
+
+        assert IODTreeViewModelAdapter.has_placeholder_child(model.item(0, 0)) is False
+
 
 class TestBuildTreeviewModelAlreadyLoadedChildren:
     """Tests for IODTreeViewModelAdapter.build_treeview_model's child-population from data_model."""
@@ -272,14 +312,19 @@ class TestBuildTreeviewModelAlreadyLoadedChildren:
         assert qt_model.item(alpha_row, 0).rowCount() == 1
 
     def test_does_not_populate_children_for_iod_not_yet_loaded(self, iod_entries):
-        """An IOD with no entry in data_model.iod_specmodels keeps zero children."""
+        """An IOD with no entry in data_model.iod_specmodels keeps only its placeholder child.
+
+        The placeholder (added by populate_treeview_model_top_level) is what makes the disclosure
+        arrow show up front, before anything has been loaded.
+        """
         data_model = FakeDataModel({})
         adapter = IODTreeViewModelAdapter()
 
         qt_model, _ = adapter.build_treeview_model(iod_entries, data_model)
 
-        child_counts = [qt_model.item(row, 0).rowCount() for row in range(qt_model.rowCount())]
-        assert child_counts == [0] * len(iod_entries)
+        top_level_items = [qt_model.item(row, 0) for row in range(qt_model.rowCount())]
+        assert [item.rowCount() for item in top_level_items] == [1] * len(iod_entries)
+        assert all(item.child(0, 0).data(IS_PLACEHOLDER_ROLE) is True for item in top_level_items)
 
     def test_selected_table_id_returns_matching_row_index(self, iod_entries):
         """A selected_table_id matching a displayed entry returns its row index."""

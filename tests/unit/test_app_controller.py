@@ -34,7 +34,7 @@ from dcmspec.progress import Progress, ProgressStatus
 
 import dcmspec_explorer.controller.app_controller as app_controller_module
 from dcmspec_explorer.controller.app_controller import AppController
-from dcmspec_explorer.controller.iod_treeview_adapter import IODTreeViewModelAdapter
+from dcmspec_explorer.controller.iod_treeview_adapter import IODTreeViewModelAdapter, COLUMN_INDEX
 from dcmspec_explorer.model.model import IODEntry
 from dcmspec_explorer.qt.qt_roles import TABLE_ID_ROLE, NODE_PATH_ROLE
 
@@ -66,6 +66,7 @@ _BOUND_METHOD_NAMES = [
     "_connect_signals",
     "_connect_iodlist_signals",
     "_handle_iod_item_clicked",
+    "_on_treeview_item_expanded",
     "_start_iod_model_load",
     "_handle_module_item_clicked",
     "_handle_attribute_item_clicked",
@@ -326,7 +327,6 @@ class FakeIodTreeView:
         self._selection_model = selection_model if selection_model is not None else FakeSelectionModel()
         self._header = FakeTreeViewHeader()
         self.set_enabled_calls = []
-        self.expand_calls = []
         self.set_current_index_calls = []
 
     def setEnabled(self, enabled):
@@ -348,10 +348,6 @@ class FakeIodTreeView:
     def setCurrentIndex(self, index):
         """Record the call."""
         self.set_current_index_calls.append(index)
-
-    def expand(self, index):
-        """Record the call."""
-        self.expand_calls.append(index)
 
     def header(self):
         """Return the fake header."""
@@ -588,7 +584,8 @@ class FakeLoadIODDialog:
 def _iod_index_with_children(children_populated):
     """Return (qt_model, index, name_item, kind_item) for a single top-level IOD row.
 
-    children_populated=True gives it one already-populated Module child; False leaves it empty.
+    children_populated=True gives it one already-populated Module child; False leaves it with
+    only the not-yet-loaded placeholder child that populate_treeview_model_top_level always adds.
     """
     entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
     adapter = IODTreeViewModelAdapter()
@@ -602,7 +599,7 @@ def _iod_index_with_children(children_populated):
         IODTreeViewModelAdapter.populate_treeview_model_item(iod_item, content)
     index = qt_model.indexFromItem(iod_item)
     name_item = qt_model.itemFromIndex(index.siblingAtColumn(0))
-    kind_item = qt_model.itemFromIndex(index.siblingAtColumn(1))
+    kind_item = qt_model.itemFromIndex(index.siblingAtColumn(COLUMN_INDEX["kind"]))
     return qt_model, index, name_item, kind_item
 
 
@@ -885,7 +882,11 @@ class TestOnTreeviewItemClicked:
         assert view.details_html_calls == []
 
     def test_top_level_click_dispatches_to_iod_item_handler(self, fake_logger):
-        """A top-level (IOD) click renders the IOD details html."""
+        """A top-level (IOD) click renders the IOD details html, including its actual kind.
+
+        Regression test: the kind column is COLUMN_INDEX["kind"] (2), not 1 (the status icon
+        column) -- reading the wrong column silently rendered an empty "IOD Kind:" field.
+        """
         qt_model, iod_index, _module_index, _attribute_index = _build_iod_tree_with_module_and_attribute()
         view = FakeView(ui=FakeUi(iod_tree_view=FakeIodTreeView(model=qt_model)))
         state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
@@ -893,9 +894,17 @@ class TestOnTreeviewItemClicked:
         state._on_treeview_item_clicked(iod_index)
 
         assert "Alpha IOD" in view.details_html_calls[-1]
+        assert "Composite" in view.details_html_calls[-1]
 
     def test_module_level_click_with_details_dispatches_to_module_handler(self, fake_logger):
-        """A second-level (Module) click with a resolvable node renders the module details html."""
+        """A second-level (Module) click with a resolvable node renders the module details html.
+
+        Regression test: iod_kind is read from its parent IOD row's kind column
+        (COLUMN_INDEX["kind"], 2, not 1 -- the status icon column). Reading the wrong column
+        makes iod_kind resolve to "" instead of "Composite", silently switching
+        _handle_module_item_clicked to its non-Composite branch (Reference/Description instead
+        of IE/Usage).
+        """
         qt_model, _iod_index, module_index, _attribute_index = _build_iod_tree_with_module_and_attribute()
         view = FakeView(ui=FakeUi(iod_tree_view=FakeIodTreeView(model=qt_model)))
         model = FakeModel(
@@ -914,6 +923,7 @@ class TestOnTreeviewItemClicked:
         state._on_treeview_item_clicked(module_index)
 
         assert "Patient Module" in view.details_html_calls[-1]
+        assert "IE:" in view.details_html_calls[-1]
         assert view.nodetails_html_calls == []
 
     def test_module_level_click_without_details_shows_nodetails(self, fake_logger):
@@ -958,38 +968,84 @@ class TestOnTreeviewItemClicked:
 
 
 class TestHandleIodItemClicked:
-    """Tests for AppController._handle_iod_item_clicked (uses the LoadIODDialog monkeypatch)."""
+    """Tests for AppController._handle_iod_item_clicked: renders details, never loads anything.
 
-    def test_children_already_populated_returns_early_without_starting_worker(self, fake_logger):
-        """An IOD row that already has children only renders details, without loading anything."""
-        qt_model, index, name_item, kind_item = _iod_index_with_children(children_populated=True)
-        view = FakeView(ui=FakeUi(iod_tree_view=FakeIodTreeView(model=qt_model)))
+    Loading is triggered separately, by expanding the item (see TestOnTreeviewItemExpanded), so
+    selecting a row (by mouse or keyboard) never itself starts a load.
+    """
+
+    def test_children_already_populated_only_renders_details(self, fake_logger):
+        """An IOD row that already has real children only renders details."""
+        # qt_model is kept alive for the test's duration: its QStandardItems are owned by it, and
+        # would otherwise be garbage-collected (deleting the underlying C++ objects) once discarded.
+        qt_model, _, name_item, kind_item = _iod_index_with_children(children_populated=True)
+        view = FakeView()
         state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
 
-        state._handle_iod_item_clicked(index, name_item, kind_item)
+        state._handle_iod_item_clicked(name_item, kind_item)
 
         assert view.details_html_calls
         assert state.iod_model_service.start_iodmodel_worker_calls == []
         assert view.status_bar_calls == []
+        assert qt_model is not None
+
+    def test_not_yet_loaded_only_renders_details(self, fake_logger):
+        """An IOD row with only its placeholder child also only renders details."""
+        qt_model, _, name_item, kind_item = _iod_index_with_children(children_populated=False)
+        view = FakeView()
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+
+        state._handle_iod_item_clicked(name_item, kind_item)
+
+        assert view.details_html_calls
+        assert state.iod_model_service.start_iodmodel_worker_calls == []
+        assert view.status_bar_calls == []
+        assert qt_model is not None
+
+
+class TestOnTreeviewItemExpanded:
+    """Tests for AppController._on_treeview_item_expanded (uses the LoadIODDialog monkeypatch)."""
 
     def test_not_yet_loaded_starts_worker_and_shows_progress_dialog(self, fake_logger, monkeypatch):
-        """An IOD row with no children yet starts the model loader and shows the progress dialog."""
+        """Expanding an IOD row with only its placeholder child starts the model loader."""
         monkeypatch.setattr(app_controller_module, "LoadIODDialog", FakeLoadIODDialog)
         FakeLoadIODDialog.instances.clear()
-        qt_model, index, name_item, kind_item = _iod_index_with_children(children_populated=False)
+        qt_model, index, _, _ = _iod_index_with_children(children_populated=False)
         iod_tree_view = FakeIodTreeView(model=qt_model)
         view = FakeView(ui=FakeUi(iod_tree_view=iod_tree_view))
         state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
 
-        state._handle_iod_item_clicked(index, name_item, kind_item)
+        state._on_treeview_item_expanded(index)
 
         assert state.iod_model_service.start_iodmodel_worker_calls == ["table_A.1-1"]
         assert len(FakeLoadIODDialog.instances) == 1
         assert FakeLoadIODDialog.instances[0].shown is True
         assert state.progress_dialog is FakeLoadIODDialog.instances[0]
         assert iod_tree_view.set_enabled_calls == [False]
-        assert iod_tree_view.expand_calls == [index]
         assert view.status_bar_calls[-1] == "Loading IOD specification..."
+
+    def test_already_loaded_does_not_start_worker_again(self, fake_logger):
+        """Expanding an IOD row whose children are already real content does not reload it."""
+        qt_model, index, _, _ = _iod_index_with_children(children_populated=True)
+        iod_tree_view = FakeIodTreeView(model=qt_model)
+        view = FakeView(ui=FakeUi(iod_tree_view=iod_tree_view))
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+
+        state._on_treeview_item_expanded(index)
+
+        assert state.iod_model_service.start_iodmodel_worker_calls == []
+        assert iod_tree_view.set_enabled_calls == []
+
+    def test_non_top_level_index_is_ignored(self, fake_logger):
+        """Expanding a Module item (its Attribute children already exist) starts nothing."""
+        qt_model, iod_index, module_index, _ = _build_iod_tree_with_module_and_attribute()
+        iod_tree_view = FakeIodTreeView(model=qt_model)
+        view = FakeView(ui=FakeUi(iod_tree_view=iod_tree_view))
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+
+        state._on_treeview_item_expanded(module_index)
+
+        assert state.iod_model_service.start_iodmodel_worker_calls == []
 
 
 class TestHandleModuleItemClicked:
@@ -1567,14 +1623,8 @@ class TestHandleIodlistLoaded:
 
         assert view.update_treeview_calls[-1].rowCount() == 1
 
-    def test_populates_already_loaded_children_twice_when_no_new_version(self, fake_logger):
-        """Characterizes current (buggy) behavior, not fixed here.
-
-        build_treeview_model (called via apply_filter_and_sort) already populates children for
-        every already-loaded IOD. When no new version is available, this handler unconditionally
-        repeats that same population, so the children end up duplicated. Pinned down as-is, per
-        this project's "test current behavior, don't fix bugs" rule.
-        """
+    def test_repeated_population_of_already_loaded_children_is_not_duplicated(self, fake_logger):
+        """A second, redundant population pass for an already-loaded IOD doesn't duplicate its children."""
         entry = IODEntry("Alpha", "table_A.1-1", "url", "Composite")
         content = Node("content")
         module = Node("PatientModule", parent=content)
@@ -1586,7 +1636,7 @@ class TestHandleIodlistLoaded:
 
         state._handle_iodlist_loaded(sender=object(), iod_entry_list=[entry])
 
-        assert view.ui.iodTreeView.model().item(0, 0).rowCount() == 2
+        assert view.ui.iodTreeView.model().item(0, 0).rowCount() == 1
 
     def test_does_not_repeat_population_when_new_version_available(self, fake_logger):
         """When a new version is available, the extra (duplicating) population pass is skipped."""

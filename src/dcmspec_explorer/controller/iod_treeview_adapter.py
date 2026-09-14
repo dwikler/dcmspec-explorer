@@ -7,7 +7,13 @@ from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon
 
 from dcmspec_explorer.model.model import IODEntry, Model
 from dcmspec_explorer.services.favorites_manager import FavoritesManager
-from dcmspec_explorer.qt.qt_roles import TABLE_ID_ROLE, TABLE_URL_ROLE, NODE_PATH_ROLE, IS_FAVORITE_ROLE
+from dcmspec_explorer.qt.qt_roles import (
+    TABLE_ID_ROLE,
+    TABLE_URL_ROLE,
+    NODE_PATH_ROLE,
+    IS_FAVORITE_ROLE,
+    IS_PLACEHOLDER_ROLE,
+)
 
 # Define mapping of column names to their indices
 COLUMN_INDEX = {
@@ -44,6 +50,11 @@ class IODTreeViewModelAdapter:
                 return table_id
             item = item.parent()
         return None
+
+    @staticmethod
+    def has_placeholder_child(item: QStandardItem) -> bool:
+        """Check whether item's child is the placeholder for a not yet downloaded spec model."""
+        return item.rowCount() == 1 and bool(item.child(0, 0).data(IS_PLACEHOLDER_ROLE))
 
     def build_treeview_model(
         self,
@@ -122,6 +133,11 @@ class IODTreeViewModelAdapter:
     def populate_treeview_model_top_level(self, iod_list: List[IODEntry]) -> QStandardItemModel:
         """Convert a list of IODEntry objects into a QStandardItemModel for use with a QTreeView.
 
+        Every IOD row gets a placeholder child so its disclosure arrow shows immediately,
+        regardless of whether its spec model has been loaded yet. This is what lets a lazy load
+        be triggered by the treeview's own expand gesture (mouse or keyboard) rather than by mere
+        selection, so browsing the list never itself starts a load.
+
         Args:
             iod_list (List[IODEntry] or None): List of IODEntry objects.
 
@@ -146,6 +162,10 @@ class IODTreeViewModelAdapter:
             # Store table_id and iod_type as data for later retrieval
             item_name.setData(iod.table_id, role=TABLE_ID_ROLE)
             item_name.setData(iod.table_url, role=TABLE_URL_ROLE)
+
+            placeholder = QStandardItem("Loading…")
+            placeholder.setData(True, IS_PLACEHOLDER_ROLE)
+            item_name.appendRow([placeholder])
 
             model.appendRow([item_name, item_status, item_kind, item_usage, item_favorite_flag])
 
@@ -180,6 +200,11 @@ class IODTreeViewModelAdapter:
         """Populate the tree with IOD structure from the model content using AnyTree traversal."""
         if not content:
             return
+
+        # Drop the placeholder child (or any previous content) before repopulating, so the real
+        # content replaces it rather than piling up alongside it.
+        if parent_item.rowCount():
+            parent_item.removeRows(0, parent_item.rowCount())
 
         tree_items: dict[Node, QStandardItem] = {}  # Map from node to QStandardItem for building hierarchy
 

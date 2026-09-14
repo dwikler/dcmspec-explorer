@@ -35,6 +35,7 @@ class MainWindow(QMainWindow):
     # Define custom signals that will be emitted when UI events occur.
     window_shown = Signal()
     iod_treeview_item_selected = Signal(object)  # signal payload is item index
+    iod_treeview_item_expanded = Signal(QModelIndex)  # signal payload is the expanded item's index
     iod_treeview_right_click = Signal(QModelIndex, QPoint)  # index and global position
     header_clicked = Signal(int)  # signal payload is clicked column index
     search_text_changed = Signal(str)  # signal payload is search box text
@@ -152,6 +153,7 @@ class MainWindow(QMainWindow):
         """Connect UI widget signals to their handlers."""
         header = self.ui.iodTreeView.header()
         self.ui.iodTreeView.customContextMenuRequested.connect(self._on_treeview_right_click)
+        self.ui.iodTreeView.expanded.connect(self.iod_treeview_item_expanded)
         self.ui.searchLineEdit.textChanged.connect(self._on_search_text_changed)
         header.sectionClicked.connect(self._on_treeview_header_clicked)
         self.ui.toggleFavoritesPushButton.clicked.connect(self._on_toggle_favorite_display_clicked)
