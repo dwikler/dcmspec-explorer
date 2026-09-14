@@ -115,6 +115,7 @@ class AppController(QObject):
         self.view.header_clicked.connect(self._on_treeview_header_clicked)
         self.view.search_text_changed.connect(self._on_search_text_changed)
         self.view.iod_treeview_item_selected.connect(self._on_treeview_item_clicked)
+        self.view.iod_treeview_item_expanded.connect(self._on_treeview_item_expanded)
         self.view.iod_treeview_right_click.connect(self._on_treeview_right_click)
         self.view.details_link_clicked.connect(self._on_details_link_clicked)
         self.view.explanation_link_clicked.connect(self._on_explanation_link_clicked)
@@ -176,17 +177,17 @@ class AppController(QObject):
             return
 
         selected_item_name = model.itemFromIndex(index.siblingAtColumn(0))
-        selected_item_kind = model.itemFromIndex(index.siblingAtColumn(1))
+        selected_item_kind = model.itemFromIndex(index.siblingAtColumn(MainWindow.COL_KIND))
 
         # Check the clicked item level and take appropriate action
         if index.parent().isValid() is False:
             # top-level (IOD)
-            self._handle_iod_item_clicked(index, selected_item_name, selected_item_kind)
+            self._handle_iod_item_clicked(selected_item_name, selected_item_kind)
 
         elif index.parent().parent().isValid() is False:
             # second-level (Module)
             parent_index = index.parent()
-            parent_kind_item = model.itemFromIndex(parent_index.siblingAtColumn(1))
+            parent_kind_item = model.itemFromIndex(parent_index.siblingAtColumn(MainWindow.COL_KIND))
             iod_kind = parent_kind_item.text() if parent_kind_item else "Unknown"
             details = self.get_selected_item_details(selected_item_name)
             if details is not None:
@@ -409,11 +410,12 @@ class AppController(QObject):
             ]
         )
 
-    def _handle_iod_item_clicked(
-        self, index: QModelIndex, selected_item_name: QStandardItem, selected_item_kind: QStandardItem
-    ) -> None:
-        """Handle click on a top-level (IOD) item."""
-        # Update contents of the details panel
+    def _handle_iod_item_clicked(self, selected_item_name: QStandardItem, selected_item_kind: QStandardItem) -> None:
+        """Handle selection of a top-level (IOD) item: show its details, without loading its spec model.
+
+        Loading the spec model is triggered by expanding the item (_on_treeview_item_expanded), so that browsing the
+        tree with the mouse or keyboard never starts a load.
+        """
         table_id = selected_item_name.data(TABLE_ID_ROLE) if selected_item_name else None
         table_url = selected_item_name.data(TABLE_URL_ROLE) if selected_item_name else None
         table_ref = table_id.split("table_", 1)[-1] if table_id and table_id.startswith("table_") else table_id
@@ -424,14 +426,21 @@ class AppController(QObject):
         self.view.set_details_html(html)
         self.view.hide_explanation()
 
-        # Stop here if children are already populated
-        if selected_item_name.hasChildren() and selected_item_name.rowCount() > 0:
+    def _on_treeview_item_expanded(self, index: QModelIndex) -> None:
+        """Start loading a top-level IOD's spec model the first time it's expanded."""
+        # Do nothing is not at IOD top level as already loaded.
+        if index.parent().isValid():
             return
-
-        self._start_iod_model_load(table_id)
-
-        # Set expand property for the selected iod item in the view (will be effective when item will be populated)
-        self.view.ui.iodTreeView.expand(index)
+        # Retrieve item table_id role and start IOD spec model load if not yet loaded.
+        model = cast(Optional[QStandardItemModel], index.model())
+        if not model:
+            return
+        item = model.itemFromIndex(index.siblingAtColumn(0))
+        if not item or not self.treeview_adapter.has_placeholder_child(item):
+            return
+        table_id = item.data(TABLE_ID_ROLE)
+        if table_id:
+            self._start_iod_model_load(table_id)
 
     def _start_iod_model_load(self, table_id: str, force_rebuild: bool = False) -> None:
         """Start (or force-reload) an IOD model load in the background and wire up its handlers.
