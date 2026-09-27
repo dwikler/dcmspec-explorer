@@ -426,6 +426,14 @@ class AppController(QObject):
         self.view.set_details_html(html)
         self.view.hide_explanation()
 
+        # Update the status bar to indicate whether the IOD's spec model is already loaded, or needs to be loaded
+        if self._is_iod_loaded(table_id):
+            self.view.update_status_bar(message="IOD specification loaded.")
+        elif self.model.is_iod_model_cached(table_id):
+            self.view.update_status_bar(message="Expand this IOD to load its specification from cache.")
+        else:
+            self.view.update_status_bar(message="Expand this IOD to load its specification from the web.")
+
     def _on_treeview_item_expanded(self, index: QModelIndex) -> None:
         """Start loading a top-level IOD's spec model the first time it's expanded."""
         # Do nothing is not at IOD top level as already loaded.

@@ -968,29 +968,46 @@ class TestOnTreeviewItemClicked:
 
 
 class TestHandleIodItemClicked:
-    """Tests for AppController._handle_iod_item_clicked: renders details, never loads anything.
+    """Tests for AppController._handle_iod_item_clicked: renders details, never starts a load.
 
     Loading is triggered separately, by expanding the item (see TestOnTreeviewItemExpanded), so
-    selecting a row (by mouse or keyboard) never itself starts a load.
+    selecting a row (by mouse or keyboard) never itself starts a load. It does still reflect the
+    IOD's actual load state on the status bar, so a stale "loaded" message from a previously
+    selected IOD doesn't linger over one that isn't loaded yet.
     """
 
-    def test_children_already_populated_only_renders_details(self, fake_logger):
-        """An IOD row that already has real children only renders details."""
+    def test_already_loaded_renders_details_and_status(self, fake_logger):
+        """An IOD row whose spec model is already loaded renders details and the loaded status."""
         # qt_model is kept alive for the test's duration: its QStandardItems are owned by it, and
         # would otherwise be garbage-collected (deleting the underlying C++ objects) once discarded.
         qt_model, _, name_item, kind_item = _iod_index_with_children(children_populated=True)
         view = FakeView()
-        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+        model = FakeModel(iod_specmodels={"table_A.1-1": object()})
+        state = make_controller_state(view=view, model=model, logger=fake_logger)
 
         state._handle_iod_item_clicked(name_item, kind_item)
 
         assert view.details_html_calls
         assert state.iod_model_service.start_iodmodel_worker_calls == []
-        assert view.status_bar_calls == []
+        assert view.status_bar_calls == ["IOD specification loaded."]
         assert qt_model is not None
 
-    def test_not_yet_loaded_only_renders_details(self, fake_logger):
-        """An IOD row with only its placeholder child also only renders details."""
+    def test_cached_not_loaded_renders_details_and_prompts_to_expand(self, fake_logger):
+        """An IOD row cached on disk but not yet loaded tells the user to expand to load it."""
+        qt_model, _, name_item, kind_item = _iod_index_with_children(children_populated=False)
+        view = FakeView()
+        model = FakeModel(cached_table_ids=["table_A.1-1"])
+        state = make_controller_state(view=view, model=model, logger=fake_logger)
+
+        state._handle_iod_item_clicked(name_item, kind_item)
+
+        assert view.details_html_calls
+        assert state.iod_model_service.start_iodmodel_worker_calls == []
+        assert view.status_bar_calls == ["Expand this IOD to load its specification from cache."]
+        assert qt_model is not None
+
+    def test_not_cached_renders_details_and_prompts_to_download(self, fake_logger):
+        """An IOD row with no cache yet tells the user to expand to download and load it."""
         qt_model, _, name_item, kind_item = _iod_index_with_children(children_populated=False)
         view = FakeView()
         state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
@@ -999,7 +1016,7 @@ class TestHandleIodItemClicked:
 
         assert view.details_html_calls
         assert state.iod_model_service.start_iodmodel_worker_calls == []
-        assert view.status_bar_calls == []
+        assert view.status_bar_calls == ["Expand this IOD to load its specification from the web."]
         assert qt_model is not None
 
 
