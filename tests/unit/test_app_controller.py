@@ -1166,13 +1166,32 @@ class TestHandleAttributeItemClicked:
         assert state._explanation_loaded_section_id == "sect_C.1"
 
 
+def _fake_qmenu(monkeypatch):
+    """Monkeypatch AppController's QMenu to FakeQMenu, with a cleared instance history."""
+    monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
+    FakeQMenu.instances.clear()
+
+
+def _favorited_treeview_index(monkeypatch):
+    """Return (qt_model, index) for a single top-level IOD row ("table_A.1-1"), with QMenu faked.
+
+    qt_model is kept alive by the caller for the test's duration: its QStandardItems are owned by
+    it, and would otherwise be garbage-collected (deleting the underlying C++ objects) once
+    discarded.
+    """
+    _fake_qmenu(monkeypatch)
+    entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
+    qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
+    index = qt_model.indexFromItem(qt_model.item(0, 0))
+    return qt_model, index
+
+
 class TestOnTreeviewRightClick:
     """Tests for AppController._on_treeview_right_click (uses the QMenu monkeypatch)."""
 
     def test_no_table_id_logs_warning_and_shows_no_menu(self, fake_logger, monkeypatch, caplog):
         """A row with no TABLE_ID_ROLE (e.g. a child row) logs a warning and shows nothing."""
-        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
-        FakeQMenu.instances.clear()
+        _fake_qmenu(monkeypatch)
         qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([])
         name_item = QStandardItem("NoId")
         qt_model.appendRow([name_item])
@@ -1188,11 +1207,7 @@ class TestOnTreeviewRightClick:
 
     def test_menu_offers_remove_when_already_favorite(self, fake_logger, monkeypatch):
         """A favorited IOD's context menu offers "Remove from favorites"."""
-        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
-        FakeQMenu.instances.clear()
-        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
-        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
-        index = qt_model.indexFromItem(qt_model.item(0, 0))
+        qt_model, index = _favorited_treeview_index(monkeypatch)
         favorites = FakeFavoritesManager(favorite_table_ids={"table_A.1-1"})
         state = make_controller_state(
             view=FakeView(), model=FakeModel(), logger=fake_logger, favorites_manager=favorites
@@ -1203,14 +1218,11 @@ class TestOnTreeviewRightClick:
         menu = FakeQMenu.instances[-1]
         assert [action.text for action in menu.actions] == ["Remove from favorites"]
         assert menu.exec_calls == ["pos"]
+        assert qt_model is not None
 
     def test_menu_offers_add_when_not_favorite(self, fake_logger, monkeypatch):
         """A non-favorited IOD's context menu offers "Add to favorites"."""
-        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
-        FakeQMenu.instances.clear()
-        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
-        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
-        index = qt_model.indexFromItem(qt_model.item(0, 0))
+        qt_model, index = _favorited_treeview_index(monkeypatch)
         favorites = FakeFavoritesManager()
         state = make_controller_state(
             view=FakeView(), model=FakeModel(), logger=fake_logger, favorites_manager=favorites
@@ -1220,14 +1232,11 @@ class TestOnTreeviewRightClick:
 
         menu = FakeQMenu.instances[-1]
         assert [action.text for action in menu.actions] == ["Add to favorites"]
+        assert qt_model is not None
 
     def test_selecting_menu_action_toggles_favorite(self, fake_logger, monkeypatch):
         """Triggering the menu action calls back into _toggle_favorite with the row's table_id."""
-        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
-        FakeQMenu.instances.clear()
-        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
-        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
-        index = qt_model.indexFromItem(qt_model.item(0, 0))
+        qt_model, index = _favorited_treeview_index(monkeypatch)
         favorites = FakeFavoritesManager()
         state = make_controller_state(
             view=FakeView(), model=FakeModel(), logger=fake_logger, favorites_manager=favorites
@@ -1237,14 +1246,11 @@ class TestOnTreeviewRightClick:
         FakeQMenu.instances[-1].actions[0].triggered.connected[0]()
 
         assert favorites.add_calls == ["table_A.1-1"]
+        assert qt_model is not None
 
     def test_export_submenu_disabled_with_tooltip_when_specmodel_not_loaded(self, fake_logger, monkeypatch):
         """The Export submenu is disabled with an explanatory tooltip if the IOD hasn't been loaded yet."""
-        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
-        FakeQMenu.instances.clear()
-        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
-        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
-        index = qt_model.indexFromItem(qt_model.item(0, 0))
+        qt_model, index = _favorited_treeview_index(monkeypatch)
         state = make_controller_state(
             view=FakeView(),
             model=FakeModel(iod_specmodels={}),
@@ -1258,14 +1264,11 @@ class TestOnTreeviewRightClick:
         assert [action.text for action in export_menu.actions] == ["CSV...", "Excel..."]
         assert export_menu.enabled is False
         assert export_menu.tool_tip == "Select this IOD first to load it"
+        assert qt_model is not None
 
     def test_export_submenu_enabled_when_specmodel_loaded(self, fake_logger, monkeypatch):
         """The Export submenu is enabled once the IOD's specmodel is present in Model.iod_specmodels."""
-        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
-        FakeQMenu.instances.clear()
-        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
-        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
-        index = qt_model.indexFromItem(qt_model.item(0, 0))
+        qt_model, index = _favorited_treeview_index(monkeypatch)
         state = make_controller_state(
             view=FakeView(),
             model=FakeModel(iod_specmodels={"table_A.1-1": "loaded_model"}),
@@ -1278,14 +1281,11 @@ class TestOnTreeviewRightClick:
         export_menu = FakeQMenu.instances[-1].submenus["Export"]
         assert export_menu.enabled is True
         assert export_menu.tool_tip == ""
+        assert qt_model is not None
 
     def test_selecting_csv_export_action_calls_export_iod_model(self, fake_logger, monkeypatch):
         """Triggering the "CSV..." action calls back into _export_iod_model with fmt="csv"."""
-        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
-        FakeQMenu.instances.clear()
-        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
-        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
-        index = qt_model.indexFromItem(qt_model.item(0, 0))
+        qt_model, index = _favorited_treeview_index(monkeypatch)
         calls = []
         state = make_controller_state(
             view=FakeView(),
@@ -1300,14 +1300,11 @@ class TestOnTreeviewRightClick:
         export_menu.actions[0].triggered.connected[0]()
 
         assert calls == [("table_A.1-1", "Alpha", "csv")]
+        assert qt_model is not None
 
     def test_selecting_excel_export_action_calls_export_iod_model(self, fake_logger, monkeypatch):
         """Triggering the "Excel..." action calls back into _export_iod_model with fmt="xlsx"."""
-        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
-        FakeQMenu.instances.clear()
-        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
-        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
-        index = qt_model.indexFromItem(qt_model.item(0, 0))
+        qt_model, index = _favorited_treeview_index(monkeypatch)
         calls = []
         state = make_controller_state(
             view=FakeView(),
@@ -1322,6 +1319,7 @@ class TestOnTreeviewRightClick:
         export_menu.actions[1].triggered.connected[0]()
 
         assert calls == [("table_A.1-1", "Alpha", "xlsx")]
+        assert qt_model is not None
 
 
 class TestExportSelectedIod:
