@@ -14,7 +14,7 @@ from anytree import Node
 from bs4 import BeautifulSoup
 from dcmspec.spec_model import SpecModel
 
-from dcmspec_explorer.model.model import Model
+from dcmspec_explorer.model.model import Model, SectionNotAttributeDescriptionError
 
 from ..unit.fixtures_iod_list import list_of_tables_soup
 
@@ -243,19 +243,23 @@ class TestGetOrLoadSection:
 
         assert result is cached
 
-    def test_success_builds_resolves_images_and_caches_the_section(self, model, monkeypatch, fake_logger):
-        """A fresh section is built via SpecFactory, has its images resolved, and is cached in the registry."""
-        built = _make_specmodel()
-        create_model_calls = []
+    def test_cache_hit_returns_cached_model_without_loading_the_standard_page(self, model, monkeypatch, fake_logger):
+        """A section already cached on disk is returned without loading/parsing the standard page."""
+        cached = _make_specmodel()
         resolve_calls = []
 
         class FakeSectionFactory:
             def __init__(self, **kwargs):
                 self.input_handler = object()
 
-            def create_model(self, **kwargs):
-                create_model_calls.append(kwargs)
-                return built
+            def try_load_cache(self, *args, **kwargs):
+                return cached
+
+            def load_document(self, **kwargs):
+                pytest.fail("load_document should not be called on a cache hit")
+
+            def build_model(self, **kwargs):
+                pytest.fail("build_model should not be called on a cache hit")
 
         class FakeImageResolver:
             def __init__(self, **kwargs):
@@ -269,8 +273,83 @@ class TestGetOrLoadSection:
 
         result = model.get_or_load_section("sect_C.7.6.16.2.1.1", fake_logger)
 
+        assert result is cached
+        assert model._section_specmodels["sect_C.7.6.16.2.1.1"] is cached
+        assert resolve_calls == [(cached, model.PART3_XHTML_URL)]
+
+    def test_cache_miss_builds_resolves_images_and_caches_the_section(self, model, monkeypatch, fake_logger):
+        """A section not yet cached is built via SpecFactory, has its images resolved, and is registered."""
+        built = _make_specmodel()
+        build_model_calls = []
+        resolve_calls = []
+
+        class FakeSectionParser:
+            def __init__(self, **kwargs):
+                pass
+
+            def is_attribute_description(self, dom, section_id):
+                return True
+
+        class FakeSectionFactory:
+            def __init__(self, **kwargs):
+                self.input_handler = object()
+
+            def try_load_cache(self, *args, **kwargs):
+                return None
+
+            def load_document(self, **kwargs):
+                return "fake-dom"
+
+            def build_model(self, **kwargs):
+                build_model_calls.append(kwargs)
+                return built
+
+        class FakeImageResolver:
+            def __init__(self, **kwargs):
+                pass
+
+            def resolve(self, section_model, url, **kwargs):
+                resolve_calls.append((section_model, url))
+
+        monkeypatch.setattr("dcmspec_explorer.model.model.DOMSectionSpecParser", FakeSectionParser)
+        monkeypatch.setattr("dcmspec_explorer.model.model.SpecFactory", FakeSectionFactory)
+        monkeypatch.setattr("dcmspec_explorer.model.model.SectionImageResolver", FakeImageResolver)
+
+        result = model.get_or_load_section("sect_C.7.6.16.2.1.1", fake_logger)
+
         assert result is built
         assert model._section_specmodels["sect_C.7.6.16.2.1.1"] is built
         assert resolve_calls == [(built, model.PART3_XHTML_URL)]
-        assert create_model_calls[0]["table_id"] == "sect_C.7.6.16.2.1.1"
-        assert create_model_calls[0]["json_file_name"] == "sections/sect_C.7.6.16.2.1.1.json"
+        assert build_model_calls[0]["table_id"] == "sect_C.7.6.16.2.1.1"
+        assert build_model_calls[0]["json_file_name"] == "sections/sect_C.7.6.16.2.1.1.json"
+
+    def test_reference_to_a_non_attribute_description_section_is_rejected(self, model, monkeypatch, fake_logger):
+        """A "See Section X" reference pointing outside any attribute description raises, unresolved."""
+
+        class FakeSectionParser:
+            def __init__(self, **kwargs):
+                pass
+
+            def is_attribute_description(self, dom, section_id):
+                return False
+
+        class FakeSectionFactory:
+            def __init__(self, **kwargs):
+                self.input_handler = object()
+
+            def try_load_cache(self, *args, **kwargs):
+                return None
+
+            def load_document(self, **kwargs):
+                return "fake-dom"
+
+            def build_model(self, **kwargs):
+                pytest.fail("build_model should not be called for a non-attribute-description section")
+
+        monkeypatch.setattr("dcmspec_explorer.model.model.DOMSectionSpecParser", FakeSectionParser)
+        monkeypatch.setattr("dcmspec_explorer.model.model.SpecFactory", FakeSectionFactory)
+
+        with pytest.raises(SectionNotAttributeDescriptionError, match="sect_C.12.1"):
+            model.get_or_load_section("sect_C.12.1", fake_logger)
+
+        assert "sect_C.12.1" not in model._section_specmodels

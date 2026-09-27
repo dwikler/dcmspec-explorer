@@ -52,6 +52,10 @@ class IODEntry(NamedTuple):
     kind: str
 
 
+class SectionNotAttributeDescriptionError(ValueError):
+    """Custom exception raised by Model.get_or_load_section for a section that isn't an attribute description."""
+
+
 class Model:
     """Data model for DICOM specifications.
 
@@ -391,20 +395,37 @@ class Model:
         if section_id in self._section_specmodels:
             return self._section_specmodels[section_id]
 
+        section_parser = DOMSectionSpecParser(logger=logger)
         section_factory = SpecFactory(
-            table_parser=DOMSectionSpecParser(logger=logger),
+            table_parser=section_parser,
             config=self.config,
             logger=logger,
         )
-        # create_model is preferred to load_document then build_model as it checks the per-section
-        # JSON cache before loading/parsing the standard page.
-        section_model = section_factory.create_model(
-            url=self.PART3_XHTML_URL,
-            cache_file_name=self.PART3_XHTML_CACHE_FILE_NAME,
-            table_id=section_id,
-            force_download=False,
-            json_file_name=f"sections/{section_id}.json",
-        )
+        json_file_name = f"sections/{section_id}.json"
+
+        # Check the section JSON cache first to avoid loading/parsing the standard page for
+        # a section already resolved.
+        section_model = section_factory.try_load_cache(json_file_name, include_depth=None, model_kwargs=None)
+        # Load the standard DOM.
+        if section_model is None:
+            dom = section_factory.load_document(
+                url=self.PART3_XHTML_URL,
+                cache_file_name=self.PART3_XHTML_CACHE_FILE_NAME,
+                force_download=False,
+            )
+            # Check that this reference actually points at an attribute description
+            # (a section below a Module's table of Attributes).
+            if not section_parser.is_attribute_description(dom, section_id):
+                raise SectionNotAttributeDescriptionError(
+                    f"Section '{section_id}' is not an attribute description of a module or macro."
+                )
+            # Build the section model and cache it to disk.
+            section_model = section_factory.build_model(
+                doc_object=dom,
+                table_id=section_id,
+                url=self.PART3_XHTML_URL,
+                json_file_name=json_file_name,
+            )
 
         # The image files themselves are cached under standard/figures/, but the image_paths
         # list isn't saved in the section's JSON cache, so it must be recomputed on every load.

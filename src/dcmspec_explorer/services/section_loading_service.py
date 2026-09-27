@@ -5,6 +5,8 @@ import queue
 import threading
 from typing import Any
 
+from dcmspec_explorer.model.model import SectionNotAttributeDescriptionError
+
 
 class SectionLoaderWorker:
     """Load a single explanatory section in a background thread."""
@@ -30,6 +32,9 @@ class SectionLoaderWorker:
         try:
             section_model = self.model.get_or_load_section(self.section_id, self.logger)
             self.event_queue.put(("loaded", section_model))
+        except SectionNotAttributeDescriptionError as e:
+            self.logger.info(f"Section '{self.section_id}' is not an attribute description: {e}")
+            self.event_queue.put(("error", str(e)))
         except Exception as e:
             self.logger.exception(f"Failed to load explanatory section for section_id: {self.section_id}")
             self.event_queue.put(("error", str(e)))

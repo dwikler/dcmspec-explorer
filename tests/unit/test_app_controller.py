@@ -1877,7 +1877,7 @@ class TestOnDetailsLinkClicked:
         state._on_details_link_clicked(QUrl("#sect_C.1"))
 
         assert state.section_service.start_section_worker_calls == ["sect_C.1"]
-        assert view.explanation_visible_calls[-1] is True
+        assert view.explanation_visible_calls == []
         assert view.anchor_warning_calls == []
         assert view.url_warning_calls == []
 
@@ -1967,17 +1967,22 @@ class TestOnExplanationLinkClicked:
 class TestOnSectionLinkClicked:
     """Tests for AppController._on_section_link_clicked."""
 
-    def test_not_yet_loaded_starts_worker_and_shows_loading_message(self, fake_logger):
-        """An unloaded section starts the background worker and shows a loading placeholder."""
+    def test_not_yet_loaded_starts_worker_without_opening_the_drawer_yet(self, fake_logger):
+        """An unloaded section starts the background worker without opening the drawer yet.
+
+        The drawer only opens once the section is confirmed loadable (see TestHandleSectionLoaded),
+        so a reference that turns out not to be an attribute description never shows a drawer.
+        """
         view = FakeView()
         state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
 
         state._on_section_link_clicked("sect_C.1")
 
         assert state.section_service.start_section_worker_calls == ["sect_C.1"]
-        assert view.explanation_visible_calls[-1] is True
-        assert "Loading" in view.explanation_html_calls[-1]
+        assert view.explanation_visible_calls == []
+        assert view.explanation_html_calls == []
         assert state._explanation_requested_section_id == "sect_C.1"
+        assert view.status_bar_calls == ["Loading explanatory section..."]
 
     def test_already_loaded_section_just_shows_it_without_refetching(self, fake_logger):
         """Re-clicking an already-loaded section's link just shows it, without a new fetch."""
@@ -1990,6 +1995,7 @@ class TestOnSectionLinkClicked:
 
         assert state.section_service.start_section_worker_calls == []
         assert view.explanation_visible_calls[-1] is True
+        assert view.status_bar_calls == []
 
 
 class TestHandleSectionLoaded:
@@ -2009,6 +2015,8 @@ class TestHandleSectionLoaded:
         state._handle_section_loaded(state.section_service, section_model, "sect_C.1")
 
         assert view.explanation_html_calls[-1] == "<h1>Section Title</h1><p>Section content</p>"
+        assert view.explanation_visible_calls[-1] is True
+        assert view.status_bar_calls[-1] == ""
         assert state._explanation_loaded_section_id == "sect_C.1"
 
     def test_ignores_a_result_for_a_section_no_longer_requested(self, fake_logger):
@@ -2025,14 +2033,16 @@ class TestHandleSectionLoaded:
         state._handle_section_loaded(state.section_service, section_model, "sect_C.1")
 
         assert view.explanation_html_calls == []
+        assert view.explanation_visible_calls == []
+        assert view.status_bar_calls == []
         assert state._explanation_loaded_section_id is None
 
 
 class TestHandleSectionError:
     """Tests for AppController._handle_section_error."""
 
-    def test_renders_error_inline_in_drawer_not_as_a_dialog(self, fake_logger):
-        """A section load failure is shown inline in the drawer, not as a modal error dialog."""
+    def test_offers_the_section_on_the_web_without_ever_opening_the_drawer(self, fake_logger):
+        """A section load failure offers to open the section in the browser, with no drawer shown."""
         view = FakeView()
         state = make_controller_state(
             view=view, model=FakeModel(), logger=fake_logger, _explanation_requested_section_id="sect_C.1"
@@ -2040,8 +2050,11 @@ class TestHandleSectionError:
 
         state._handle_section_error(state.section_service, "boom", "sect_C.1")
 
-        assert "boom" in view.explanation_html_calls[-1]
+        assert view.explanation_visible_calls == []
+        assert view.explanation_html_calls == []
         assert view.error_calls == []
+        assert view.status_bar_calls[-1] == ""
+        assert view.url_warning_calls == [f"{app_controller_module.Model.PART3_XHTML_URL}#sect_C.1"]
 
     def test_ignores_an_error_for_a_section_no_longer_requested(self, fake_logger):
         """A stale error for a section superseded by a later click is not applied to the drawer."""
@@ -2052,7 +2065,9 @@ class TestHandleSectionError:
 
         state._handle_section_error(state.section_service, "boom", "sect_C.1")
 
-        assert view.explanation_html_calls == []
+        assert view.explanation_visible_calls == []
+        assert view.status_bar_calls == []
+        assert view.url_warning_calls == []
 
 
 class TestShowSectionUnavailable:
