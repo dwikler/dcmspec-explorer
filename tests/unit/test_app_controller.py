@@ -1183,13 +1183,32 @@ class TestHandleAttributeItemClicked:
         assert state._explanation_loaded_section_id == "sect_C.1"
 
 
+def _fake_qmenu(monkeypatch):
+    """Monkeypatch AppController's QMenu to FakeQMenu, with a cleared instance history."""
+    monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
+    FakeQMenu.instances.clear()
+
+
+def _favorited_treeview_index(monkeypatch):
+    """Return (qt_model, index) for a single top-level IOD row ("table_A.1-1"), with QMenu faked.
+
+    qt_model is kept alive by the caller for the test's duration: its QStandardItems are owned by
+    it, and would otherwise be garbage-collected (deleting the underlying C++ objects) once
+    discarded.
+    """
+    _fake_qmenu(monkeypatch)
+    entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
+    qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
+    index = qt_model.indexFromItem(qt_model.item(0, 0))
+    return qt_model, index
+
+
 class TestOnTreeviewRightClick:
     """Tests for AppController._on_treeview_right_click (uses the QMenu monkeypatch)."""
 
     def test_no_table_id_logs_warning_and_shows_no_menu(self, fake_logger, monkeypatch, caplog):
         """A row with no TABLE_ID_ROLE (e.g. a child row) logs a warning and shows nothing."""
-        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
-        FakeQMenu.instances.clear()
+        _fake_qmenu(monkeypatch)
         qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([])
         name_item = QStandardItem("NoId")
         qt_model.appendRow([name_item])
@@ -1205,11 +1224,7 @@ class TestOnTreeviewRightClick:
 
     def test_menu_offers_remove_when_already_favorite(self, fake_logger, monkeypatch):
         """A favorited IOD's context menu offers "Remove from favorites"."""
-        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
-        FakeQMenu.instances.clear()
-        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
-        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
-        index = qt_model.indexFromItem(qt_model.item(0, 0))
+        qt_model, index = _favorited_treeview_index(monkeypatch)
         favorites = FakeFavoritesManager(favorite_table_ids={"table_A.1-1"})
         state = make_controller_state(
             view=FakeView(), model=FakeModel(), logger=fake_logger, favorites_manager=favorites
@@ -1220,14 +1235,11 @@ class TestOnTreeviewRightClick:
         menu = FakeQMenu.instances[-1]
         assert [action.text for action in menu.actions] == ["Remove from favorites"]
         assert menu.exec_calls == ["pos"]
+        assert qt_model is not None
 
     def test_menu_offers_add_when_not_favorite(self, fake_logger, monkeypatch):
         """A non-favorited IOD's context menu offers "Add to favorites"."""
-        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
-        FakeQMenu.instances.clear()
-        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
-        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
-        index = qt_model.indexFromItem(qt_model.item(0, 0))
+        qt_model, index = _favorited_treeview_index(monkeypatch)
         favorites = FakeFavoritesManager()
         state = make_controller_state(
             view=FakeView(), model=FakeModel(), logger=fake_logger, favorites_manager=favorites
@@ -1237,14 +1249,11 @@ class TestOnTreeviewRightClick:
 
         menu = FakeQMenu.instances[-1]
         assert [action.text for action in menu.actions] == ["Add to favorites"]
+        assert qt_model is not None
 
     def test_selecting_menu_action_toggles_favorite(self, fake_logger, monkeypatch):
         """Triggering the menu action calls back into _toggle_favorite with the row's table_id."""
-        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
-        FakeQMenu.instances.clear()
-        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
-        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
-        index = qt_model.indexFromItem(qt_model.item(0, 0))
+        qt_model, index = _favorited_treeview_index(monkeypatch)
         favorites = FakeFavoritesManager()
         state = make_controller_state(
             view=FakeView(), model=FakeModel(), logger=fake_logger, favorites_manager=favorites
@@ -1254,14 +1263,11 @@ class TestOnTreeviewRightClick:
         FakeQMenu.instances[-1].actions[0].triggered.connected[0]()
 
         assert favorites.add_calls == ["table_A.1-1"]
+        assert qt_model is not None
 
     def test_export_submenu_disabled_with_tooltip_when_specmodel_not_loaded(self, fake_logger, monkeypatch):
         """The Export submenu is disabled with an explanatory tooltip if the IOD hasn't been loaded yet."""
-        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
-        FakeQMenu.instances.clear()
-        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
-        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
-        index = qt_model.indexFromItem(qt_model.item(0, 0))
+        qt_model, index = _favorited_treeview_index(monkeypatch)
         state = make_controller_state(
             view=FakeView(),
             model=FakeModel(iod_specmodels={}),
@@ -1275,14 +1281,11 @@ class TestOnTreeviewRightClick:
         assert [action.text for action in export_menu.actions] == ["CSV...", "Excel..."]
         assert export_menu.enabled is False
         assert export_menu.tool_tip == "Select this IOD first to load it"
+        assert qt_model is not None
 
     def test_export_submenu_enabled_when_specmodel_loaded(self, fake_logger, monkeypatch):
         """The Export submenu is enabled once the IOD's specmodel is present in Model.iod_specmodels."""
-        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
-        FakeQMenu.instances.clear()
-        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
-        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
-        index = qt_model.indexFromItem(qt_model.item(0, 0))
+        qt_model, index = _favorited_treeview_index(monkeypatch)
         state = make_controller_state(
             view=FakeView(),
             model=FakeModel(iod_specmodels={"table_A.1-1": "loaded_model"}),
@@ -1295,14 +1298,11 @@ class TestOnTreeviewRightClick:
         export_menu = FakeQMenu.instances[-1].submenus["Export"]
         assert export_menu.enabled is True
         assert export_menu.tool_tip == ""
+        assert qt_model is not None
 
     def test_selecting_csv_export_action_calls_export_iod_model(self, fake_logger, monkeypatch):
         """Triggering the "CSV..." action calls back into _export_iod_model with fmt="csv"."""
-        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
-        FakeQMenu.instances.clear()
-        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
-        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
-        index = qt_model.indexFromItem(qt_model.item(0, 0))
+        qt_model, index = _favorited_treeview_index(monkeypatch)
         calls = []
         state = make_controller_state(
             view=FakeView(),
@@ -1317,14 +1317,11 @@ class TestOnTreeviewRightClick:
         export_menu.actions[0].triggered.connected[0]()
 
         assert calls == [("table_A.1-1", "Alpha", "csv")]
+        assert qt_model is not None
 
     def test_selecting_excel_export_action_calls_export_iod_model(self, fake_logger, monkeypatch):
         """Triggering the "Excel..." action calls back into _export_iod_model with fmt="xlsx"."""
-        monkeypatch.setattr(app_controller_module, "QMenu", FakeQMenu)
-        FakeQMenu.instances.clear()
-        entry = IODEntry("Alpha", "table_A.1-1", "http://example.com/a", "Composite")
-        qt_model = IODTreeViewModelAdapter().populate_treeview_model_top_level([entry])
-        index = qt_model.indexFromItem(qt_model.item(0, 0))
+        qt_model, index = _favorited_treeview_index(monkeypatch)
         calls = []
         state = make_controller_state(
             view=FakeView(),
@@ -1339,6 +1336,7 @@ class TestOnTreeviewRightClick:
         export_menu.actions[1].triggered.connected[0]()
 
         assert calls == [("table_A.1-1", "Alpha", "xlsx")]
+        assert qt_model is not None
 
 
 class TestExportSelectedIod:
@@ -1894,7 +1892,7 @@ class TestOnDetailsLinkClicked:
         state._on_details_link_clicked(QUrl("#sect_C.1"))
 
         assert state.section_service.start_section_worker_calls == ["sect_C.1"]
-        assert view.explanation_visible_calls[-1] is True
+        assert view.explanation_visible_calls == []
         assert view.anchor_warning_calls == []
         assert view.url_warning_calls == []
 
@@ -1984,17 +1982,22 @@ class TestOnExplanationLinkClicked:
 class TestOnSectionLinkClicked:
     """Tests for AppController._on_section_link_clicked."""
 
-    def test_not_yet_loaded_starts_worker_and_shows_loading_message(self, fake_logger):
-        """An unloaded section starts the background worker and shows a loading placeholder."""
+    def test_not_yet_loaded_starts_worker_without_opening_the_drawer_yet(self, fake_logger):
+        """An unloaded section starts the background worker without opening the drawer yet.
+
+        The drawer only opens once the section is confirmed loadable (see TestHandleSectionLoaded),
+        so a reference that turns out not to be an attribute description never shows a drawer.
+        """
         view = FakeView()
         state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
 
         state._on_section_link_clicked("sect_C.1")
 
         assert state.section_service.start_section_worker_calls == ["sect_C.1"]
-        assert view.explanation_visible_calls[-1] is True
-        assert "Loading" in view.explanation_html_calls[-1]
+        assert view.explanation_visible_calls == []
+        assert view.explanation_html_calls == []
         assert state._explanation_requested_section_id == "sect_C.1"
+        assert view.status_bar_calls == ["Loading explanatory section..."]
 
     def test_already_loaded_section_just_shows_it_without_refetching(self, fake_logger):
         """Re-clicking an already-loaded section's link just shows it, without a new fetch."""
@@ -2007,6 +2010,7 @@ class TestOnSectionLinkClicked:
 
         assert state.section_service.start_section_worker_calls == []
         assert view.explanation_visible_calls[-1] is True
+        assert view.status_bar_calls == []
 
 
 class TestHandleSectionLoaded:
@@ -2026,6 +2030,8 @@ class TestHandleSectionLoaded:
         state._handle_section_loaded(state.section_service, section_model, "sect_C.1")
 
         assert view.explanation_html_calls[-1] == "<h1>Section Title</h1><p>Section content</p>"
+        assert view.explanation_visible_calls[-1] is True
+        assert view.status_bar_calls[-1] == ""
         assert state._explanation_loaded_section_id == "sect_C.1"
 
     def test_ignores_a_result_for_a_section_no_longer_requested(self, fake_logger):
@@ -2042,14 +2048,16 @@ class TestHandleSectionLoaded:
         state._handle_section_loaded(state.section_service, section_model, "sect_C.1")
 
         assert view.explanation_html_calls == []
+        assert view.explanation_visible_calls == []
+        assert view.status_bar_calls == []
         assert state._explanation_loaded_section_id is None
 
 
 class TestHandleSectionError:
     """Tests for AppController._handle_section_error."""
 
-    def test_renders_error_inline_in_drawer_not_as_a_dialog(self, fake_logger):
-        """A section load failure is shown inline in the drawer, not as a modal error dialog."""
+    def test_offers_the_section_on_the_web_without_ever_opening_the_drawer(self, fake_logger):
+        """A section load failure offers to open the section in the browser, with no drawer shown."""
         view = FakeView()
         state = make_controller_state(
             view=view, model=FakeModel(), logger=fake_logger, _explanation_requested_section_id="sect_C.1"
@@ -2057,8 +2065,11 @@ class TestHandleSectionError:
 
         state._handle_section_error(state.section_service, "boom", "sect_C.1")
 
-        assert "boom" in view.explanation_html_calls[-1]
+        assert view.explanation_visible_calls == []
+        assert view.explanation_html_calls == []
         assert view.error_calls == []
+        assert view.status_bar_calls[-1] == ""
+        assert view.url_warning_calls == [f"{app_controller_module.Model.PART3_XHTML_URL}#sect_C.1"]
 
     def test_ignores_an_error_for_a_section_no_longer_requested(self, fake_logger):
         """A stale error for a section superseded by a later click is not applied to the drawer."""
@@ -2069,7 +2080,9 @@ class TestHandleSectionError:
 
         state._handle_section_error(state.section_service, "boom", "sect_C.1")
 
-        assert view.explanation_html_calls == []
+        assert view.explanation_visible_calls == []
+        assert view.status_bar_calls == []
+        assert view.url_warning_calls == []
 
 
 class TestShowSectionUnavailable:

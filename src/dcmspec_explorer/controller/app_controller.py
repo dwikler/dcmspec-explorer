@@ -659,15 +659,19 @@ class AppController(QObject):
         self.view.hide_explanation()
 
     def _on_section_link_clicked(self, section_id: str) -> None:
-        """Load (if needed) and show the given explanatory section in the drawer."""
+        """Load (if needed) and show the given explanatory section in the drawer.
+
+        The drawer is only opened once the section is confirmed loadable (_handle_section_loaded),
+        not optimistically here: whether this reference is really an attribute description isn't
+        known until the background load checks it, and a failure falls back to opening it on the
+        web (_handle_section_error) instead, with no drawer to have shown and closed again.
+        """
         if section_id == self._explanation_loaded_section_id:
             self.view.show_explanation()
             return
 
-        self.view.show_explanation()
-        self.view.set_explanation_html("<p><em>Loading explanatory section&hellip;</em></p>")
-
         self._explanation_requested_section_id = section_id
+        self.view.update_status_bar(message="Loading explanatory section...")
         self._section_worker, self._section_thread = self.section_service.start_section_worker(section_id)
 
         self._safe_disconnect(
@@ -699,17 +703,23 @@ class AppController(QObject):
         section_html = getattr(section_model.content, "html", "")
         title_html = f"<h1>{html.escape(section_model.metadata.title)}</h1>"
         self.view.set_explanation_html(title_html + section_html)
+        self.view.show_explanation()
+        self.view.update_status_bar(message="")
 
     def _handle_section_error(self, sender: object, message: str, section_id: str) -> None:
-        """Show an explanatory section load failure inline in the drawer, not as a modal dialog.
+        """On an explanatory section load failure, offer the section on the web instead of the drawer.
 
         Ignored if the drawer has since moved on to a different section (e.g. the user clicked
         another attribute's reference before this one failed).
         """
         if section_id != self._explanation_requested_section_id:
             return
-        self.logger.error(f"Error signal received from {sender}: {message}")
-        self.view.set_explanation_html(f"<p>Could not load this explanatory section: {html.escape(message)}</p>")
+        # The worker already logs the actual cause at the right severity (info if this section
+        # simply isn't an attribute description, error/exception for a genuine load failure); this
+        # UI-level fallback to opening the section on the web applies the same either way.
+        self.logger.info(f"Falling back to opening section '{section_id}' on the web: {message}")
+        self.view.update_status_bar(message="")
+        self.view.show_url_link_warning_dialog(f"{Model.PART3_XHTML_URL}#{section_id}")
 
     def _show_section_unavailable(self) -> None:
         """Show the drawer's 'not available in cache' message with a link to reload the current IOD."""

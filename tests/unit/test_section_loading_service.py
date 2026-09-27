@@ -2,6 +2,7 @@
 
 import queue
 
+from dcmspec_explorer.model.model import SectionNotAttributeDescriptionError
 from dcmspec_explorer.services.section_loading_service import SectionLoaderWorker
 
 
@@ -72,3 +73,28 @@ class TestSectionLoaderWorker:
         assert caplog.records[-1].levelname == "ERROR"
         assert "ValueError" in caplog.text
         assert "inner" in caplog.text
+
+    def test_not_an_attribute_description_logs_info_not_exception(self, fake_logger, caplog):
+        """A section that isn't an attribute description is an expected outcome, not a logged error."""
+        event_queue = queue.Queue()
+        message = "Section 'sect_C.12.1' is not an attribute description of a module or macro."
+        model = FakeModel(error=SectionNotAttributeDescriptionError(message))
+        worker = SectionLoaderWorker(model=model, section_id="sect_C.12.1", logger=fake_logger, event_queue=event_queue)
+
+        worker.run()
+
+        assert event_queue.get_nowait() == ("error", message)
+        assert caplog.records[-1].levelname == "INFO"
+
+    def test_unrelated_value_error_logs_exception_not_info(self, fake_logger, caplog):
+        """A plain ValueError unrelated to the attribute description check is logged as an error."""
+        event_queue = queue.Queue()
+        model = FakeModel(error=ValueError("unexpected shape mismatch"))
+        worker = SectionLoaderWorker(
+            model=model, section_id="sect_C.7.6.16.2.1.1", logger=fake_logger, event_queue=event_queue
+        )
+
+        worker.run()
+
+        assert event_queue.get_nowait() == ("error", "unexpected shape mismatch")
+        assert caplog.records[-1].levelname == "ERROR"
