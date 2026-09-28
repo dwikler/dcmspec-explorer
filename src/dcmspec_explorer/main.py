@@ -10,6 +10,8 @@ def main():
     Initialize and launch the Qt UI for exploring DICOM specifications.
     """
     app = QApplication([])
+    app.setApplicationName("DCMspec Explorer")
+    app.setApplicationDisplayName("DCMspec Explorer")
 
     controller = AppController()
     controller.run()
