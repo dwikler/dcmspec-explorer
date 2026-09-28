@@ -1,7 +1,7 @@
 """Main Window View class for the DCMspec Explorer application."""
 
 import logging
-import os
+from importlib import resources
 from typing import List, Optional
 
 from PySide6.QtCore import Signal, QUrl, Qt, QModelIndex, QPoint
@@ -110,18 +110,20 @@ class MainWindow(QMainWindow):
 
     def _load_details_css(self) -> None:
         """Load the details pane CSS from resources/styles."""
-        css_path = os.path.join(os.path.dirname(__file__), "..", "resources", "styles", "details.css")
+        css_resource = resources.files("dcmspec_explorer") / "resources" / "styles" / "details.css"
         try:
-            with open(css_path, "r", encoding="utf-8") as f:
-                self.details_css = f.read()
+            self.details_css = css_resource.read_text(encoding="utf-8")
         except Exception as e:
             self.details_css = ""
             self.logger.warning(f"Could not load details.css: {e}")
 
     def _load_icon(self, filename: str) -> Optional[QIcon]:
         """Load a QIcon from resources/icons, or return None if the file is missing."""
-        path = os.path.join(os.path.dirname(__file__), "..", "resources", "icons", filename)
-        return QIcon(path) if os.path.exists(path) else None
+        icon_resource = resources.files("dcmspec_explorer") / "resources" / "icons" / filename
+        if not icon_resource.is_file():
+            return None
+        with resources.as_file(icon_resource) as icon_path:
+            return QIcon(str(icon_path))
 
     def _select_icons(self) -> None:
         """Select the application's icon set for the current theme."""
