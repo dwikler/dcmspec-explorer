@@ -56,7 +56,7 @@ def load_app_config() -> Config:
     1. User config directory (recommended for all users):
         - platformdirs user_config_dir("dcmspec-explorer", "dcmspec"), e.g.:
             - Linux:   ~/.config/dcmspec-explorer/dcmspec_explorer_config.json
-            - macOS:   ~/Library/Application Support/dcmspec/dcmspec-explorer/dcmspec_explorer_config.json
+            - macOS:   ~/Library/Application Support/dcmspec-explorer/dcmspec_explorer_config.json
             - Windows: %APPDATA%\dcmspec\dcmspec-explorer\dcmspec_explorer_config.json
     2. Project config directory (recommended for developers):
         - config/dcmspec_explorer_config.json in the project root, when running from a project checkout.
