@@ -81,7 +81,7 @@ When starting, the application looks for a config file in the following order:
 
    - **Linux:** `~/.config/dcmspec-explorer/dcmspec_explorer_config.json`
    - **macOS:** `~/Library/Application Support/dcmspec-explorer/dcmspec_explorer_config.json`
-   - **Windows:** `%APPDATA%\dcmspec\dcmspec-explorer\dcmspec_explorer_config.json`
+   - **Windows:** `%LOCALAPPDATA%\dcmspec\dcmspec-explorer\dcmspec_explorer_config.json`
 
 3. **Project config directory (recommended for developers):**
 
