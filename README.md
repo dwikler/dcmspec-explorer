@@ -107,6 +107,10 @@ The list of your favorite IODs is stored in a file named `favorites.json` in the
 
 > **Tip:** To move your configuration and favorites to another machine, simply copy both your config file and `favorites.json` from the same directory.
 
+## Look and feel
+
+The app uses Qt's Fusion style on all platforms, for a consistent look. To use another style, set the `QT_STYLE_OVERRIDE` environment variable to a Qt style name (for example `windows11`) before starting the app.
+
 ## Credits
 
 Icons from:
