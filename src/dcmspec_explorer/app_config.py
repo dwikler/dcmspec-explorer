@@ -13,7 +13,7 @@ from dcmspec.config import Config
 def find_project_root(marker="pyproject.toml") -> Optional[Path]:
     """Find the project root by searching for a marker file up the directory tree.
 
-    Returns None when there is no project checkout, e.g. in a packaged app.
+    Returns None when not running from the cloned repository, e.g. in a packaged app.
     """
     current = Path(__file__).resolve()
     for parent in [current] + list(current.parents):
@@ -58,8 +58,9 @@ def load_app_config() -> Config:
             - Linux:   ~/.config/dcmspec-explorer/dcmspec_explorer_config.json
             - macOS:   ~/Library/Application Support/dcmspec-explorer/dcmspec_explorer_config.json
             - Windows: %APPDATA%\dcmspec\dcmspec-explorer\dcmspec_explorer_config.json
+            (the `dcmspec`author folder is only added on Windows)
     2. Project config directory (recommended for developers):
-        - config/dcmspec_explorer_config.json in the project root, when running from a project checkout.
+        - config/dcmspec_explorer_config.json in the project root, when running from the cloned repository.
     3. Current directory (easy for less experienced users):
         - dcmspec_explorer_config.json in the current working directory.
     4. If no config file is found, or if a key is missing, defaults are used via the base Config class.
