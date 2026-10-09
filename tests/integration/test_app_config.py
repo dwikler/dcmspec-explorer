@@ -76,6 +76,16 @@ class TestLoadAppConfigSearchOrder:
 
         assert config.get_param("marker") == "project_config_dir"
 
+    def test_missing_project_root_skips_project_config_dir(self, monkeypatch, tmp_path):
+        """Without a project checkout (packaged app), loading still works and falls through to cwd."""
+        monkeypatch.delenv("DCMSPEC_EXPLORER_CONFIG", raising=False)
+        monkeypatch.setattr("dcmspec_explorer.app_config.find_project_root", lambda marker="pyproject.toml": None)
+        _seed_cwd_config(monkeypatch, tmp_path, {"marker": "cwd"})
+
+        config = load_app_config()
+
+        assert config.get_param("marker") == "cwd"
+
     def test_cwd_config_is_picked_as_final_fallback(self, monkeypatch, tmp_path, project_root):
         """With no env var, user-config-dir, or project-dir file, the cwd file is picked."""
         monkeypatch.delenv("DCMSPEC_EXPLORER_CONFIG", raising=False)

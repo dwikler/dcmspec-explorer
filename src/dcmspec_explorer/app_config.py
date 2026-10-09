@@ -3,19 +3,23 @@
 import logging
 import os
 from pathlib import Path
+from typing import Optional
 
 from platformdirs import user_config_dir
 
 from dcmspec.config import Config
 
 
-def find_project_root(marker="pyproject.toml"):
-    """Find the project root by searching for a marker file up the directory tree."""
+def find_project_root(marker="pyproject.toml") -> Optional[Path]:
+    """Find the project root by searching for a marker file up the directory tree.
+
+    Returns None when there is no project checkout, e.g. in a packaged app.
+    """
     current = Path(__file__).resolve()
     for parent in [current] + list(current.parents):
         if (parent / marker).exists():
             return parent
-    raise FileNotFoundError(f"Could not find project root with marker {marker}")
+    return None
 
 
 def parse_bool(val):
@@ -55,7 +59,7 @@ def load_app_config() -> Config:
             - macOS:   ~/Library/Application Support/dcmspec/dcmspec-explorer/dcmspec_explorer_config.json
             - Windows: %APPDATA%\dcmspec\dcmspec-explorer\dcmspec_explorer_config.json
     2. Project config directory (recommended for developers):
-        - config/dcmspec_explorer_config.json in the project root.
+        - config/dcmspec_explorer_config.json in the project root, when running from a project checkout.
     3. Current directory (easy for less experienced users):
         - dcmspec_explorer_config.json in the current working directory.
     4. If no config file is found, or if a key is missing, defaults are used via the base Config class.
@@ -74,8 +78,8 @@ def load_app_config() -> Config:
         env_config or None,
         # 1. User config (recommended for all users)
         os.path.join(user_config_dir("dcmspec-explorer", "dcmspec"), "dcmspec_explorer_config.json"),
-        # 2. Project config dir (recommended for developers)
-        str(project_root / "config" / "dcmspec_explorer_config.json"),
+        # 2. Project config dir (recommended for developers); absent in a packaged app
+        str(project_root / "config" / "dcmspec_explorer_config.json") if project_root else None,
         # 3. Current directory (easy for less experienced users)
         "dcmspec_explorer_config.json",
     ]
