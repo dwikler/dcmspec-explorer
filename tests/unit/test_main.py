@@ -27,6 +27,15 @@ class TestApplyStyle:
 
         assert app.styles == ["Fusion"]
 
+    def test_sets_fusion_when_override_is_empty(self, monkeypatch):
+        """An empty QT_STYLE_OVERRIDE selects no style, so the Fusion style is set."""
+        monkeypatch.setenv("QT_STYLE_OVERRIDE", "")
+        app = FakeApp()
+
+        apply_style(app)
+
+        assert app.styles == ["Fusion"]
+
     def test_keeps_style_override(self, monkeypatch):
         """A style chosen through QT_STYLE_OVERRIDE is left alone."""
         monkeypatch.setenv("QT_STYLE_OVERRIDE", "macos")

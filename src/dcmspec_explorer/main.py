@@ -7,12 +7,12 @@ from dcmspec_explorer.controller.app_controller import AppController
 
 
 def apply_style(app: QApplication) -> None:
-    """Use the Fusion style on all platforms, unless QT_STYLE_OVERRIDE selects one.
+    """Use the Fusion style on all platforms, unless QT_STYLE_OVERRIDE selects one (an empty value selects none).
 
     Fusion looks the same everywhere, and avoids the native macOS style that renders poorly under the
     macOS 27 design when the app is linked against its SDK.
     """
-    if "QT_STYLE_OVERRIDE" not in os.environ:
+    if not os.environ.get("QT_STYLE_OVERRIDE"):
         app.setStyle("Fusion")
 
 
