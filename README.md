@@ -48,6 +48,20 @@ A modern PySide6-based GUI application for exploring DICOM specifications, power
    dcmspec-explorer
    ```
 
+### Building a native app (optional)
+
+Only macOS has been built and tested; Windows and Linux are untested.
+
+1. Install a C compiler (Xcode command line tools on macOS, GCC on Linux, MSVC on Windows).
+   On Windows, run from the Developer Command Prompt for VS so `dumpbin` is available.
+2. From the repository root, with the dev dependencies installed:
+
+   ```bash
+   poetry run build-app
+   ```
+
+3. Find the app in `build/` (`dcmspec-explorer.app` on macOS).
+
 ## Configuration
 
 The application can be configured via a `dcmspec_explorer_config.json` file. Supported keys:
