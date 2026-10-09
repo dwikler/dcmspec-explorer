@@ -7,7 +7,7 @@
 
 # Name of the output folder, applied after the build; not passed to Nuitka
 title = dcmspec-explorer
-project_dir = src/dcmspec_explorer
+project_dir = ../src/dcmspec_explorer
 input_file = src/dcmspec_explorer/main.py
 exec_directory = build
 project_file = 
