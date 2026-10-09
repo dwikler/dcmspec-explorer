@@ -62,3 +62,30 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: poetry run pytest -v tests/unit tests/integration
+
+  # Runs only the tests: the lint and type checks above are platform-independent.
+  windows-tests:
+    name: test (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Setup Poetry
+        uses: pronovic/setup-poetry@v3
+        with:
+          version: "2.1.1"
+          cache-venv: "true"
+          cache-poetry: "true"
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Run pytest
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: poetry run pytest -v tests/unit tests/integration

@@ -2,8 +2,11 @@
 
 import json
 import logging
+import os
+import sys
 
 import pytest
+from platformdirs import user_config_dir
 
 from dcmspec_explorer.app_config import find_project_root, load_app_config, setup_logger
 
@@ -38,6 +41,31 @@ def clean_app_logger():
     logger.handlers = []
     yield
     logger.handlers = []
+
+
+class TestDocumentedUserConfigDir:
+    """Tests that the user config directory documented in the README matches the real platformdirs result."""
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only path")
+    def test_windows_path_is_under_localappdata(self):
+        """On Windows, the user config directory is under %LOCALAPPDATA%."""
+        expected = os.path.join(os.environ["LOCALAPPDATA"], "dcmspec", "dcmspec-explorer")
+
+        assert user_config_dir("dcmspec-explorer", "dcmspec") == expected
+
+    @pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only path")
+    def test_macos_path_has_no_author_folder(self):
+        """On macOS, the user config directory has no author folder."""
+        expected = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "dcmspec-explorer")
+
+        assert user_config_dir("dcmspec-explorer", "dcmspec") == expected
+
+    @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux-only path")
+    def test_linux_path_has_no_author_folder(self):
+        """On Linux, the user config directory has no author folder."""
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+
+        assert user_config_dir("dcmspec-explorer", "dcmspec") == os.path.join(base, "dcmspec-explorer")
 
 
 class TestFindProjectRoot:
