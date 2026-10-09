@@ -26,6 +26,7 @@ plugins = accessiblebridge,egldeviceintegrations,generic,iconengines,imageformat
 
 [nuitka]
 macos.permissions = 
+mode = onefile
 
 # --quiet = less Nuitka output
 # --static-libpython = no: Nuitka's static libpython detection fails with Homebrew Python
