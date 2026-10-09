@@ -5,7 +5,7 @@ import logging
 
 import pytest
 
-from dcmspec_explorer.app_config import load_app_config, setup_logger
+from dcmspec_explorer.app_config import find_project_root, load_app_config, setup_logger
 
 
 def _write_json(path, data):
@@ -38,6 +38,21 @@ def clean_app_logger():
     logger.handlers = []
     yield
     logger.handlers = []
+
+
+class TestFindProjectRoot:
+    """Tests for find_project_root against the real filesystem."""
+
+    def test_returns_none_when_marker_is_not_found(self):
+        """With a marker that exists nowhere above the module, there is no project root."""
+        assert find_project_root(marker="no-such-marker-file.toml") is None
+
+    def test_returns_directory_containing_the_marker(self):
+        """With a marker that exists above the module, the directory holding it is returned."""
+        root = find_project_root()
+
+        assert root is not None
+        assert (root / "pyproject.toml").exists()
 
 
 class TestLoadAppConfigSearchOrder:
@@ -75,6 +90,16 @@ class TestLoadAppConfigSearchOrder:
         config = load_app_config()
 
         assert config.get_param("marker") == "project_config_dir"
+
+    def test_missing_project_root_skips_project_config_dir(self, monkeypatch, tmp_path):
+        """Outside the cloned repository (packaged app), loading still works and falls through to cwd."""
+        monkeypatch.delenv("DCMSPEC_EXPLORER_CONFIG", raising=False)
+        monkeypatch.setattr("dcmspec_explorer.app_config.find_project_root", lambda marker="pyproject.toml": None)
+        _seed_cwd_config(monkeypatch, tmp_path, {"marker": "cwd"})
+
+        config = load_app_config()
+
+        assert config.get_param("marker") == "cwd"
 
     def test_cwd_config_is_picked_as_final_fallback(self, monkeypatch, tmp_path, project_root):
         """With no env var, user-config-dir, or project-dir file, the cwd file is picked."""

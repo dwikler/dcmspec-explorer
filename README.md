@@ -48,11 +48,25 @@ A modern PySide6-based GUI application for exploring DICOM specifications, power
    dcmspec-explorer
    ```
 
+### Building a native app (optional)
+
+Only macOS has been built and tested; Windows and Linux are untested.
+
+1. Install a C compiler (Xcode command line tools on macOS, GCC on Linux, MSVC on Windows).
+   On Windows, run from the Developer Command Prompt for VS so `dumpbin` is available.
+2. From the repository root, with the dev dependencies installed:
+
+   ```bash
+   poetry run build-app
+   ```
+
+3. Find the app in `build/` (`dcmspec-explorer.app` on macOS).
+
 ## Configuration
 
 The application can be configured via a `dcmspec_explorer_config.json` file. Supported keys:
 
-- `cache_dir` (str): Path to the cache directory for downloaded files.
+- `cache_dir` (str): Path to the cache directory for downloaded files. Default: the OS per-user cache directory (e.g. `~/Library/Caches/dcmspec_explorer` on macOS). A relative path depends on where the app is started from, so an absolute path is safer.
 - `log_level` (str): Logging level ("DEBUG", "INFO", "WARNING", "ERROR"). Default: "INFO"
 - `show_favorites_on_start` (bool): If true, start the app in favorites view; otherwise, show all IODs. Default: false
 
@@ -65,16 +79,19 @@ When starting, the application looks for a config file in the following order:
 
 2. **User config directory (recommended for all users):**
 
-   - **Linux:** `~/.config/dcmspec/dcmspec-explorer/dcmspec_explorer_config.json`
-   - **macOS:** `~/Library/Application Support/dcmspec/dcmspec-explorer/dcmspec_explorer_config.json`
+   - **Linux:** `~/.config/dcmspec-explorer/dcmspec_explorer_config.json`
+   - **macOS:** `~/Library/Application Support/dcmspec-explorer/dcmspec_explorer_config.json`
    - **Windows:** `%APPDATA%\dcmspec\dcmspec-explorer\dcmspec_explorer_config.json`
 
 3. **Project config directory (recommended for developers):**
 
-   - `config/dcmspec_explorer_config.json` in the project root.
+   - `config/dcmspec_explorer_config.json` in the project root. Only used when running from the
+     cloned repository, not from a built app.
 
 4. **Current directory (easy for less experienced users):**
-   - `dcmspec_explorer_config.json` in the current working directory.
+   - `dcmspec_explorer_config.json` in the current working directory. Not reliable for a built
+     app: launched from Finder, it does not start in a folder you choose. Use the user config
+     directory instead.
 
 If no config file is found, built-in defaults are used and all user data is stored in a user-writable config directory.
 

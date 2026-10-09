@@ -19,6 +19,7 @@ packages = [{include = "dcmspec_explorer", from = "src"}]
 
 [tool.poetry.scripts]
 compile-ui = "scripts.compile_ui:main"
+build-app = "scripts.build_app:main"
 dcmspec-explorer = "dcmspec_explorer.main:main"
 
 
