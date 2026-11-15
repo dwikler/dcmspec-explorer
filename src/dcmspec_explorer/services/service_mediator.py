@@ -96,8 +96,8 @@ class BaseServiceMediator(QObject):
         try:
             if self._thread is not None and self._thread.is_alive() and threading.current_thread() is not self._thread:
                 self._thread.join(timeout=1)
-            del self._worker
-            del self._thread
+            self._worker = None
+            self._thread = None
             self.logger.debug("Worker and thread cleaned up successfully.")
         except Exception as e:
             self.logger.error(f"Error during worker/thread cleanup: {e}", exc_info=True)
