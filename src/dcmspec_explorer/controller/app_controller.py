@@ -571,7 +571,8 @@ class AppController(QObject):
         # After repopulating the treeview, re-add children for IODs by using the loaded SpecModels
         if not self.model.new_version_available:
             model = self.view.ui.iodTreeView.model()
-            for table_id, iod_model in self.model.iod_specmodels.items():
+            # Iterate over a copy, as a worker thread can add an IOD model to the dict meanwhile.
+            for table_id, iod_model in list(self.model.iod_specmodels.items()):
                 if iod_model and hasattr(iod_model, "content") and iod_model.content:
                     self.treeview_adapter.populate_iod_entry_children(model, table_id, iod_model.content)
 

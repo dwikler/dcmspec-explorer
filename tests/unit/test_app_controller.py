@@ -122,24 +122,6 @@ def make_controller_state(view, model, logger, favorites_manager=None, **overrid
     return fake_self
 
 
-class HostileSpecModelsDict(dict):
-    """Dict that injects a new key into itself right after its first items() entry is yielded.
-
-    Mutating a dict while a live iterator over it exists raises RuntimeError in CPython. This
-    reproduces that deterministically, standing in for the real hazard of Model._iod_specmodels
-    being mutated by a concurrent load/reload while _handle_iodlist_loaded is iterating it,
-    without needing an actual racing background thread.
-    """
-
-    def items(self):
-        """Yield each item, injecting a new key into self right after the first is yielded."""
-        iterator = dict.items(self)
-        for index, item in enumerate(iterator):
-            if index == 0:
-                self["injected_during_iteration"] = item[1]
-            yield item
-
-
 class FakeIodModel:
     """Fake loaded IOD spec model exposing only the .content attribute the controller reads."""
 
@@ -1737,21 +1719,27 @@ class TestHandleIodlistLoaded:
         assert view.status_bar_calls[-1] == "Listed 3 IODs."
         assert view.info_calls == []
 
-    def test_raises_if_iod_specmodels_mutated_during_iteration(self, fake_logger):
-        """Hazard test characterizing a dict mutated during iteration.
-
-        A hostile dict that mutates itself mid-iteration reproduces the same RuntimeError CPython
-        raises for a real dict mutated during a concurrent load/reload race on
-        Model._iod_specmodels, deterministically and without a real thread race.
-        """
+    def test_handles_an_iod_model_added_while_repopulating_children(self, fake_logger, monkeypatch):
+        """An IOD model added to iod_specmodels while the handler loops over it does not break the handler."""
         entry = IODEntry("Alpha", "table_A.1-1", "url", "Composite")
-        hostile_specmodels = HostileSpecModelsDict({"table_A.1-1": object()})
-        model = FakeModel(iod_specmodels=hostile_specmodels, new_version_available=False)
+        loaded = types.SimpleNamespace(content=Node("content"))
+        iod_specmodels = {"table_A.1-1": loaded}
+        model = FakeModel(iod_specmodels=iod_specmodels, new_version_available=False)
         view = FakeView()
         state = make_controller_state(view=view, model=model, logger=fake_logger)
+        populated = []
 
-        with pytest.raises(RuntimeError, match="dictionary changed size during iteration"):
-            state._handle_iodlist_loaded(sender=object(), iod_entry_list=[entry])
+        def populate_and_add_iod_model(qt_model, table_id, content):
+            # Add an IOD model from inside the loop, as a worker thread can do while the loop runs.
+            populated.append(table_id)
+            iod_specmodels["table_A.1-2"] = loaded
+
+        monkeypatch.setattr(state.treeview_adapter, "populate_iod_entry_children", populate_and_add_iod_model)
+
+        state._handle_iodlist_loaded(sender=object(), iod_entry_list=[entry])
+
+        assert populated == ["table_A.1-1"]
+        assert view.status_bar_calls[-1] == "Listed 1 IODs."
 
 
 class TestHandleIodlistError:
