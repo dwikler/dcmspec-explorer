@@ -147,6 +147,10 @@ class AppController(QObject):
         """Show the main application window and start the user interface."""
         self.view.show()
 
+    def _is_loading(self) -> bool:
+        """Whether an IOD list or IOD model load is running."""
+        return self.service.is_busy or self.iod_model_service.is_busy
+
     def initialize_treeview(self) -> None:
         """Initialize the treeview with list of IODs.
 
@@ -156,6 +160,7 @@ class AppController(QObject):
 
         # Start the worker in a background thread via the service mediator
         self._treeview_worker, self._treeview_thread = self.service.start_iodlist_worker()
+        self.view.set_loading_controls_enabled(False)
 
         # Connect signals for progress, loaded, and error
         self._connect_iodlist_signals()
@@ -279,17 +284,25 @@ class AppController(QObject):
         self._toggle_favorite(table_id)
 
     def _on_file_menu_about_to_show(self) -> None:
-        """Refresh the Export and favorite items' enabled state to match the currently selected IOD."""
+        """Refresh the Export and favorite items' enabled state to match the currently selected IOD.
+
+        Both items are disabled while an IOD list or IOD model load is running.
+        """
         selected = self.view.get_selected_iod()
         if selected is None:
             self.view.set_export_menu_enabled(False, "Select an IOD first")
             self.view.set_favorite_action(enabled=False, is_favorite=False)
             return
         table_id, _ = selected
+        is_loading = self._is_loading()
         is_loaded = self._is_iod_loaded(table_id)
-        tooltip = "" if is_loaded else "Select this IOD first to load it"
-        self.view.set_export_menu_enabled(is_loaded, tooltip)
-        self.view.set_favorite_action(enabled=True, is_favorite=self.favorites_manager.is_favorite(table_id))
+        # Disable Export while loading to prevent exporting a model that is about to be replaced or discarded.
+        if is_loading:
+            tooltip = "Wait for the load to finish"
+        else:
+            tooltip = "" if is_loaded else "Select this IOD first to load it"
+        self.view.set_export_menu_enabled(is_loaded and not is_loading, tooltip)
+        self.view.set_favorite_action(enabled=not is_loading, is_favorite=self.favorites_manager.is_favorite(table_id))
 
     @staticmethod
     def _normalize_export_filename(name: str) -> str:
@@ -344,6 +357,7 @@ class AppController(QObject):
         self.view.update_status_bar(message="Downloading latest IOD modules from web...")
         # Start the worker in a background thread via the service mediator, forcing download
         self._treeview_worker, self._treeview_thread = self.service.start_iodlist_worker(force_download=True)
+        self.view.set_loading_controls_enabled(False)
         # Connect signals for progress, loaded, and error
         self._connect_iodlist_signals()
 
@@ -456,13 +470,18 @@ class AppController(QObject):
         Used both for a top-level IOD's first load and for an explicit reload triggered from the
         explanatory section drawer (e.g. to pick up section references missing from an older cache).
         """
+        # Ignore the request if a load is already running to prevent concurrent loads.
+        if self._is_loading():
+            self.logger.warning(f"A load is already in progress: not loading IOD {table_id} now.")
+            return
+
         self.view.hide_explanation()
 
         # Update status bar message and display progress dialog
         self.view.update_status_bar(message="Loading IOD specification...")
         self.progress_dialog = LoadIODDialog(self.view)
         self.progress_dialog.show()
-        self.view.ui.iodTreeView.setEnabled(False)
+        self.view.set_loading_controls_enabled(False)
 
         # Start the IOD model loader worker in a background thread
         self._iod_model_worker, self._iod_model_thread = self.iod_model_service.start_iodmodel_worker(
@@ -544,6 +563,8 @@ class AppController(QObject):
             self.view.update_status_bar(f"Loading IOD modules... {percent}%")
 
     def _handle_iodlist_loaded(self, sender: object, iod_entry_list: list[IODEntry]) -> None:
+        self.view.set_loading_controls_enabled(True)
+
         # Populate the tree model with the loaded IODs applying filters and sorting
         self.apply_filter_and_sort(iod_entry_list=iod_entry_list)
 
@@ -570,6 +591,7 @@ class AppController(QObject):
             self.view.update_status_bar(message=f"Listed {len(iod_entry_list)} IODs.")
 
     def _handle_iodlist_error(self, sender: object, message: str) -> None:
+        self.view.set_loading_controls_enabled(True)
         self._report_error(sender, message, status_bar_message="Error loading IOD modules.")
 
     def _handle_iodmodel_progress(self, sender: object, progress: Progress) -> None:
@@ -598,7 +620,7 @@ class AppController(QObject):
             if hasattr(self, "progress_dialog") and self.progress_dialog:
                 self.progress_dialog.accept()
                 self.progress_dialog = None
-            self.view.ui.iodTreeView.setEnabled(True)
+            self.view.set_loading_controls_enabled(True)
             self.view.update_status_bar(message="IOD specification loaded.")
             self._refresh_selected_attribute_after_load(table_id)
 
@@ -621,7 +643,7 @@ class AppController(QObject):
         if hasattr(self, "progress_dialog") and self.progress_dialog:
             self.progress_dialog.reject()
             self.progress_dialog = None
-        self.view.ui.iodTreeView.setEnabled(True)
+        self.view.set_loading_controls_enabled(True)
         self.view.show_error(message)
         self.view.update_status_bar(message="Error loading IOD specification.")
 

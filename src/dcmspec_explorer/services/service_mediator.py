@@ -58,6 +58,16 @@ class BaseServiceMediator(QObject):
         self._poll_timer: Optional[QTimer] = None
         self._signal_map: Dict[str, Tuple[Any, bool]] = {}
 
+    @property
+    def is_busy(self) -> bool:
+        """Whether a worker was started and its terminal event has not been handled yet."""
+        return self._poll_timer is not None and self._poll_timer.isActive()
+
+    def _raise_if_busy(self, worker_cls: type) -> None:
+        """Raise if a previous worker of this mediator is still running."""
+        if self.is_busy:
+            raise RuntimeError(f"Cannot start {worker_cls.__name__}: a worker is already running.")
+
     def start_worker(self, worker_cls: type, **worker_kwargs: Any) -> Tuple[Any, threading.Thread]:
         """Start the given worker in a background thread and begin polling its event queue."""
         self._event_queue = queue.Queue()
@@ -121,7 +131,8 @@ class IODListLoaderServiceMediator(BaseServiceMediator):
         }
 
     def start_iodlist_worker(self, force_download: bool = False) -> Tuple[IODListLoaderWorker, threading.Thread]:
-        """Start the IOD list loader worker in a background thread."""
+        """Start the IOD list loader worker in a background thread, unless one is already running."""
+        self._raise_if_busy(IODListLoaderWorker)
         return self.start_worker(IODListLoaderWorker, model=self.model, force_download=force_download)
 
 
@@ -145,7 +156,8 @@ class IODModelLoaderServiceMediator(BaseServiceMediator):
     def start_iodmodel_worker(
         self, table_id: str, force_rebuild: bool = False
     ) -> Tuple[IODModelLoaderWorker, threading.Thread]:
-        """Start the IOD model loader worker in a background thread."""
+        """Start the IOD model loader worker in a background thread, unless one is already running."""
+        self._raise_if_busy(IODModelLoaderWorker)
         return self.start_worker(IODModelLoaderWorker, model=self.model, table_id=table_id, force_rebuild=force_rebuild)
 
 

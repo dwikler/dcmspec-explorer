@@ -60,6 +60,7 @@ _BOUND_METHOD_NAMES = [
     "_handle_export_loaded",
     "_handle_export_error",
     "_report_error",
+    "_is_loading",
     "_on_check_for_updates_clicked",
     "_toggle_favorite",
     "_safe_disconnect",
@@ -253,6 +254,7 @@ class FakeMediator:
         self.iodexport_error_signal = FakeSignal()
         self.section_loaded_signal = FakeSignal()
         self.section_error_signal = FakeSignal()
+        self.is_busy = False
         self.start_iodlist_worker_calls = []
         self.start_iodmodel_worker_calls = []
         self.start_iodmodel_worker_force_rebuild_calls = []
@@ -415,9 +417,14 @@ class FakeView:
         self._save_file_return = save_file_return
         self._selected_iod = selected_iod
         self.export_menu_enabled_calls = []
+        self.loading_controls_calls = []
         self.favorite_action_calls = []
         self.explanation_html_calls = []
         self.explanation_visible_calls = []
+
+    def set_loading_controls_enabled(self, enabled):
+        """Record the call."""
+        self.loading_controls_calls.append(enabled)
 
     def set_details_html(self, html_body):
         """Record the call."""
@@ -641,6 +648,7 @@ class TestInitializeTreeview:
 
         assert state.service.start_iodlist_worker_calls == [False]
         assert view.status_bar_calls[-1] == "Loading IOD modules..."
+        assert view.loading_controls_calls == [False]
 
 
 class TestOnCheckForUpdatesClicked:
@@ -655,6 +663,7 @@ class TestOnCheckForUpdatesClicked:
 
         assert state.service.start_iodlist_worker_calls == [True]
         assert view.status_bar_calls[-1] == "Downloading latest IOD modules from web..."
+        assert view.loading_controls_calls == [False]
         assert state.service.iodlist_loaded_signal.connected
 
 
@@ -1038,7 +1047,7 @@ class TestOnTreeviewItemExpanded:
         assert len(FakeLoadIODDialog.instances) == 1
         assert FakeLoadIODDialog.instances[0].shown is True
         assert state.progress_dialog is FakeLoadIODDialog.instances[0]
-        assert iod_tree_view.set_enabled_calls == [False]
+        assert view.loading_controls_calls == [False]
         assert view.status_bar_calls[-1] == "Loading IOD specification..."
 
     def test_already_loaded_does_not_start_worker_again(self, fake_logger):
@@ -1051,7 +1060,7 @@ class TestOnTreeviewItemExpanded:
         state._on_treeview_item_expanded(index)
 
         assert state.iod_model_service.start_iodmodel_worker_calls == []
-        assert iod_tree_view.set_enabled_calls == []
+        assert view.loading_controls_calls == []
 
     def test_non_top_level_index_is_ignored(self, fake_logger):
         """Expanding a Module item (its Attribute children already exist) starts nothing."""
@@ -1462,6 +1471,24 @@ class TestOnFileMenuAboutToShow:
 
         assert view.favorite_action_calls == [(True, True)]
 
+    @pytest.mark.parametrize("busy_service", ["service", "iod_model_service"])
+    def test_load_running_disables_export_and_favorite_for_a_loaded_favorite_iod(self, fake_logger, busy_service):
+        """While a load is running, Export and the favorite action are disabled, keeping the favorite's label."""
+        view = FakeView(selected_iod=("table_A.1-1", "Alpha"))
+        favorites = FakeFavoritesManager(favorite_table_ids={"table_A.1-1"})
+        state = make_controller_state(
+            view=view,
+            model=FakeModel(iod_specmodels={"table_A.1-1": "loaded_model"}),
+            logger=fake_logger,
+            favorites_manager=favorites,
+        )
+        getattr(state, busy_service).is_busy = True
+
+        state._on_file_menu_about_to_show()
+
+        assert view.export_menu_enabled_calls == [(False, "Wait for the load to finish")]
+        assert view.favorite_action_calls == [(False, True)]
+
 
 class TestNormalizeExportFilename:
     """Tests for AppController._normalize_export_filename."""
@@ -1689,6 +1716,15 @@ class TestHandleIodlistLoaded:
         assert view.info_calls
         assert "updated" in view.status_bar_calls[-1].lower()
 
+    def test_reenables_loading_controls(self, fake_logger):
+        """The controls disabled for the load are enabled again once the list is loaded."""
+        view = FakeView()
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+
+        state._handle_iodlist_loaded(sender=object(), iod_entry_list=[])
+
+        assert view.loading_controls_calls == [True]
+
     def test_shows_normal_count_message_when_no_new_version(self, fake_logger):
         """With no new version, the status bar shows a plain IOD count instead."""
         entries = [IODEntry("Alpha", "table_A.1-1", "url", "Composite")] * 3
@@ -1731,6 +1767,7 @@ class TestHandleIodlistError:
 
         assert view.error_calls == ["boom"]
         assert view.status_bar_calls[-1] == "Error loading IOD modules."
+        assert view.loading_controls_calls == [True]
         assert "boom" in caplog.text
 
 
@@ -1776,7 +1813,7 @@ class TestHandleIodmodelLoaded:
         assert qt_model.item(0, 0).rowCount() == 1
         assert dialog.accepted is True
         assert state.progress_dialog is None
-        assert iod_tree_view.set_enabled_calls == [True]
+        assert view.loading_controls_calls == [True]
         assert view.status_bar_calls[-1] == "IOD specification loaded."
 
     def test_shows_error_when_table_id_no_longer_visible(self, fake_logger):
@@ -1855,7 +1892,7 @@ class TestHandleIodmodelError:
 
         assert dialog.rejected is True
         assert state.progress_dialog is None
-        assert iod_tree_view.set_enabled_calls == [True]
+        assert view.loading_controls_calls == [True]
         assert view.error_calls == ["bad table_id"]
         assert view.status_bar_calls[-1] == "Error loading IOD specification."
 
@@ -2138,5 +2175,18 @@ class TestOnReloadIodLinkClicked:
         assert state.iod_model_service.start_iodmodel_worker_force_rebuild_calls == [True]
         assert len(FakeLoadIODDialog.instances) == 1
         assert FakeLoadIODDialog.instances[0].shown is True
-        assert iod_tree_view.set_enabled_calls == [False]
+        assert view.loading_controls_calls == [False]
         assert view.explanation_visible_calls[-1] is False
+
+    @pytest.mark.parametrize("busy_service", ["service", "iod_model_service"])
+    def test_does_nothing_while_a_load_is_running(self, fake_logger, busy_service):
+        """A click on the "Reload this IOD" link during an IOD list or IOD model load is ignored."""
+        view = FakeView()
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+        getattr(state, busy_service).is_busy = True
+
+        state._on_reload_iod_link_clicked("table_A.1-1")
+
+        assert state.iod_model_service.start_iodmodel_worker_calls == []
+        assert view.status_bar_calls == []
+        assert view.loading_controls_calls == []
