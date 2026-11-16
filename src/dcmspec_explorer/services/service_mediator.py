@@ -106,6 +106,8 @@ class BaseServiceMediator(QObject):
         try:
             if self._thread is not None and self._thread.is_alive() and threading.current_thread() is not self._thread:
                 self._thread.join(timeout=1)
+                if self._thread.is_alive():
+                    self.logger.warning("Worker thread did not finish within 1 second.")
             self._worker = None
             self._thread = None
             self.logger.debug("Worker and thread cleaned up successfully.")

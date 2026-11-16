@@ -245,6 +245,27 @@ class TestOverlappingWorkerStarts:
         # Cleanup logs an error when it fails, so no error record means the repeat succeeded.
         assert caplog.records == []
 
+    def test_cleanup_worker_thread_warns_when_the_thread_outlives_the_wait(self, qtbot, fake_logger, caplog):
+        """A worker thread still alive after cleanup waited for it is reported in a warning."""
+
+        class StuckThread:
+            """Thread that stays alive however long it is waited for."""
+
+            def is_alive(self):
+                return True
+
+            def join(self, timeout=None):
+                pass
+
+        mediator = IODListLoaderServiceMediator(model=FakeModel(), logger=fake_logger)
+        mediator._thread = StuckThread()
+
+        with caplog.at_level(logging.WARNING):
+            mediator.cleanup_worker_thread()
+
+        assert "Worker thread did not finish within 1 second." in caplog.text
+        assert mediator._thread is None
+
 
 class TestIODExportServiceMediatorHappyPath:
     """Tests for IODExportServiceMediator's signal emission and cleanup on real worker events.
