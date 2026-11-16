@@ -108,9 +108,10 @@ class IODTreeViewModelAdapter:
             # No else needed as sorting on other columns is not supported
 
         # Get already loaded IODs from the data_model's iod_specmodels property
+        # Iterate over a copy, as a worker thread can add an IOD model to the dict meanwhile.
         loaded_children = {
             table_id: iod_model.content
-            for table_id, iod_model in data_model.iod_specmodels.items()
+            for table_id, iod_model in list(data_model.iod_specmodels.items())
             if hasattr(iod_model, "content") and iod_model.content
         }
 
