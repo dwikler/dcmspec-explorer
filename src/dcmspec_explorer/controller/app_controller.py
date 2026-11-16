@@ -475,6 +475,12 @@ class AppController(QObject):
             self.logger.warning(f"A load is already in progress: not loading IOD {table_id} now.")
             return
 
+        # Start the IOD model loader worker in a background thread before changing the UI,
+        # to prevent locked UI on failure
+        self._iod_model_worker, self._iod_model_thread = self.iod_model_service.start_iodmodel_worker(
+            table_id, force_rebuild=force_rebuild
+        )
+
         self.view.hide_explanation()
 
         # Update status bar message and display progress dialog
@@ -482,11 +488,6 @@ class AppController(QObject):
         self.progress_dialog = LoadIODDialog(self.view)
         self.progress_dialog.show()
         self.view.set_loading_controls_enabled(False)
-
-        # Start the IOD model loader worker in a background thread
-        self._iod_model_worker, self._iod_model_thread = self.iod_model_service.start_iodmodel_worker(
-            table_id, force_rebuild=force_rebuild
-        )
 
         # Disconnect previous signal connections to avoid duplicate handlers
         self._safe_disconnect(

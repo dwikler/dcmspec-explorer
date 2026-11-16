@@ -1032,6 +1032,26 @@ class TestOnTreeviewItemExpanded:
         assert view.loading_controls_calls == [False]
         assert view.status_bar_calls[-1] == "Loading IOD specification..."
 
+    def test_failed_worker_start_leaves_the_ui_untouched(self, fake_logger, monkeypatch):
+        """When the worker cannot be started, no progress dialog is shown and the controls stay enabled."""
+        monkeypatch.setattr(app_controller_module, "LoadIODDialog", FakeLoadIODDialog)
+        FakeLoadIODDialog.instances.clear()
+        qt_model, index, _, _ = _iod_index_with_children(children_populated=False)
+        view = FakeView(ui=FakeUi(iod_tree_view=FakeIodTreeView(model=qt_model)))
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+
+        def failing_start_iodmodel_worker(table_id, force_rebuild=False):
+            raise RuntimeError("Worker could not be instantiated")
+
+        state.iod_model_service.start_iodmodel_worker = failing_start_iodmodel_worker
+
+        with pytest.raises(RuntimeError):
+            state._on_treeview_item_expanded(index)
+
+        assert FakeLoadIODDialog.instances == []
+        assert view.loading_controls_calls == []
+        assert view.status_bar_calls == []
+
     def test_already_loaded_does_not_start_worker_again(self, fake_logger):
         """Expanding an IOD row whose children are already real content does not reload it."""
         qt_model, index, _, _ = _iod_index_with_children(children_populated=True)
