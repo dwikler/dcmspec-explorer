@@ -6,7 +6,10 @@ loop, with a FakeModel whose load methods return or raise immediately so the
 background thread finishes fast and the tests stay deterministic and non-flaky.
 """
 
+import logging
 import pathlib
+
+import pytest
 
 from anytree import Node
 from openpyxl import load_workbook
@@ -83,8 +86,8 @@ class TestIODListLoaderServiceMediatorHappyPath:
         emitted_mediator, entries = blocker.args
         assert emitted_mediator is mediator
         assert entries == ["entry1", "entry2"]
-        assert not hasattr(mediator, "_worker")
-        assert not hasattr(mediator, "_thread")
+        assert mediator._worker is None
+        assert mediator._thread is None
         assert not mediator._poll_timer.isActive()
 
     def test_error_event_emits_error_signal_and_cleans_up(self, qtbot, fake_logger):
@@ -98,8 +101,8 @@ class TestIODListLoaderServiceMediatorHappyPath:
         emitted_mediator, message = blocker.args
         assert emitted_mediator is mediator
         assert message == "boom"
-        assert not hasattr(mediator, "_worker")
-        assert not hasattr(mediator, "_thread")
+        assert mediator._worker is None
+        assert mediator._thread is None
         assert not mediator._poll_timer.isActive()
 
 
@@ -130,8 +133,8 @@ class TestIODModelLoaderServiceMediatorHappyPath:
         emitted_mediator, iod_model = blocker.args
         assert emitted_mediator is mediator
         assert iod_model == "some_spec_model"
-        assert not hasattr(mediator, "_worker")
-        assert not hasattr(mediator, "_thread")
+        assert mediator._worker is None
+        assert mediator._thread is None
         assert not mediator._poll_timer.isActive()
 
     def test_error_event_emits_error_signal_and_cleans_up(self, qtbot, fake_logger):
@@ -145,8 +148,8 @@ class TestIODModelLoaderServiceMediatorHappyPath:
         emitted_mediator, message = blocker.args
         assert emitted_mediator is mediator
         assert message == "bad table_id"
-        assert not hasattr(mediator, "_worker")
-        assert not hasattr(mediator, "_thread")
+        assert mediator._worker is None
+        assert mediator._thread is None
         assert not mediator._poll_timer.isActive()
 
 
@@ -164,8 +167,8 @@ class TestSectionLoaderServiceMediatorHappyPath:
         emitted_mediator, section_model = blocker.args
         assert emitted_mediator is mediator
         assert section_model == "some_section_model"
-        assert not hasattr(mediator, "_worker")
-        assert not hasattr(mediator, "_thread")
+        assert mediator._worker is None
+        assert mediator._thread is None
         assert not mediator._poll_timer.isActive()
 
     def test_error_event_emits_error_signal_and_cleans_up(self, qtbot, fake_logger):
@@ -179,38 +182,89 @@ class TestSectionLoaderServiceMediatorHappyPath:
         emitted_mediator, message = blocker.args
         assert emitted_mediator is mediator
         assert message == "section not found"
-        assert not hasattr(mediator, "_worker")
-        assert not hasattr(mediator, "_thread")
+        assert mediator._worker is None
+        assert mediator._thread is None
         assert not mediator._poll_timer.isActive()
 
 
-class TestOverlappingWorkerStartsHazard:
-    """Regression tests characterizing the lack of any single-worker-in-flight guard.
+class TestOverlappingWorkerStarts:
+    """Tests for the one-worker-at-a-time guard of the IOD list and IOD model loader mediators."""
 
-    Both `initialize_treeview` and `_on_check_for_updates_clicked` call `start_iodlist_worker`
-    unconditionally, with no check for a worker already in flight on the same mediator.
-    These tests pin down the two concrete consequences of that missing guard.
-    """
-
-    def test_starting_a_second_worker_before_first_completes_orphans_the_first_timer(self, qtbot, fake_logger):
-        """A second start_worker call before the first is polled leaves the first QTimer orphaned and running."""
+    def test_starting_a_second_list_worker_while_busy_raises_and_keeps_the_first_timer(self, qtbot, fake_logger):
+        """A second start_iodlist_worker call before the first completes is refused, not orphaning the first timer."""
         mediator = IODListLoaderServiceMediator(model=FakeModel(iod_list=["entry"]), logger=fake_logger)
 
         mediator.start_iodlist_worker()
         first_timer = mediator._poll_timer
+        assert mediator.is_busy
 
-        mediator.start_iodlist_worker()
+        try:
+            with pytest.raises(RuntimeError):
+                mediator.start_iodlist_worker()
+            assert mediator._poll_timer is first_timer
+        finally:
+            first_timer.stop()  # avoid leaking a live repeating timer into later tests in this session
 
-        assert mediator._poll_timer is not first_timer
-        assert first_timer.isActive()
-        first_timer.stop()  # avoid leaking a live repeating timer into later tests in this session
+    def test_starting_a_second_model_worker_while_busy_raises(self, qtbot, fake_logger):
+        """A second start_iodmodel_worker call before the first completes is refused."""
+        mediator = IODModelLoaderServiceMediator(model=FakeModel(), logger=fake_logger)
 
-    def test_cleanup_worker_thread_swallows_error_on_double_cleanup(self, qtbot, fake_logger):
-        """Calling cleanup_worker_thread twice in a row does not raise, thanks to its broad except Exception."""
+        mediator.start_iodmodel_worker(table_id="table_A.2-1")
+        first_timer = mediator._poll_timer
+
+        try:
+            with pytest.raises(RuntimeError):
+                mediator.start_iodmodel_worker(table_id="table_A.2-2")
+        finally:
+            first_timer.stop()
+
+    def test_mediator_is_idle_and_restartable_after_the_terminal_event(self, qtbot, fake_logger):
+        """Once the loaded event is handled, is_busy is False and a new worker can be started."""
+        mediator = IODListLoaderServiceMediator(model=FakeModel(iod_list=["entry"]), logger=fake_logger)
+
+        with qtbot.waitSignal(mediator.iodlist_loaded_signal, timeout=1000):
+            mediator.start_iodlist_worker()
+
+        assert not mediator.is_busy
+        with qtbot.waitSignal(mediator.iodlist_loaded_signal, timeout=1000):
+            mediator.start_iodlist_worker()
+
+    def test_cleanup_worker_thread_is_idempotent(self, qtbot, fake_logger, caplog):
+        """Calling cleanup_worker_thread twice in a row leaves the mediator clean and logs no error."""
+        # No worker is started: the worker and thread are None.
         mediator = IODListLoaderServiceMediator(model=FakeModel(), logger=fake_logger)
 
-        mediator.cleanup_worker_thread()
-        mediator.cleanup_worker_thread()
+        with caplog.at_level(logging.ERROR):
+            # The first call is the normal cleanup.
+            mediator.cleanup_worker_thread()
+            # The second call is the one under test: a repeated cleanup must leave the state clean and log no error.
+            mediator.cleanup_worker_thread()
+
+        assert mediator._worker is None
+        assert mediator._thread is None
+        # Cleanup logs an error when it fails, so no error record means the repeat succeeded.
+        assert caplog.records == []
+
+    def test_cleanup_worker_thread_warns_when_the_thread_outlives_the_wait(self, qtbot, fake_logger, caplog):
+        """A worker thread still alive after cleanup waited for it is reported in a warning."""
+
+        class StuckThread:
+            """Thread that stays alive however long it is waited for."""
+
+            def is_alive(self):
+                return True
+
+            def join(self, timeout=None):
+                pass
+
+        mediator = IODListLoaderServiceMediator(model=FakeModel(), logger=fake_logger)
+        mediator._thread = StuckThread()
+
+        with caplog.at_level(logging.WARNING):
+            mediator.cleanup_worker_thread()
+
+        assert "Worker thread did not finish within 1 second." in caplog.text
+        assert mediator._thread is None
 
 
 class TestIODExportServiceMediatorHappyPath:
@@ -253,8 +307,8 @@ class TestIODExportServiceMediatorHappyPath:
         content = pathlib.Path(output_path).read_text(encoding="utf-8")
         assert "Value1" in content
         assert "Value2" in content
-        assert not hasattr(mediator, "_worker")
-        assert not hasattr(mediator, "_thread")
+        assert mediator._worker is None
+        assert mediator._thread is None
         assert not mediator._poll_timer.isActive()
 
     @staticmethod
@@ -324,6 +378,6 @@ class TestIODExportServiceMediatorHappyPath:
 
         _, message = blocker.args
         assert message == "Unsupported export format: pdf"
-        assert not hasattr(mediator, "_worker")
-        assert not hasattr(mediator, "_thread")
+        assert mediator._worker is None
+        assert mediator._thread is None
         assert not mediator._poll_timer.isActive()

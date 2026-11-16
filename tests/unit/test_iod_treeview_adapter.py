@@ -311,6 +311,33 @@ class TestBuildTreeviewModelAlreadyLoadedChildren:
         )
         assert qt_model.item(alpha_row, 0).rowCount() == 1
 
+    def test_handles_an_iod_model_added_while_collecting_the_loaded_children(self, iod_entries):
+        """An IOD model added to iod_specmodels while the adapter loops over it does not break the build."""
+        content = Node("content")
+        module = Node("PatientModule", parent=content)
+        module.module = "Patient"
+        module.usage = "Mandatory"
+        iod_specmodels = {}
+
+        class IodModelAddingAnother:
+            """Fake IOD model adding another one to iod_specmodels when its content is read."""
+
+            @property
+            def content(self):
+                # Add an IOD model from inside the loop, as a worker thread can do while the loop runs.
+                iod_specmodels["table_A.1-2"] = FakeIodModel(Node("content"))
+                return content
+
+        iod_specmodels["table_A.1-1"] = IodModelAddingAnother()
+        adapter = IODTreeViewModelAdapter()
+
+        qt_model, _ = adapter.build_treeview_model(iod_entries, FakeDataModel(iod_specmodels))
+
+        alpha_row = next(
+            row for row in range(qt_model.rowCount()) if qt_model.item(row, 0).data(TABLE_ID_ROLE) == "table_A.1-1"
+        )
+        assert qt_model.item(alpha_row, 0).rowCount() == 1
+
     def test_does_not_populate_children_for_iod_not_yet_loaded(self, iod_entries):
         """An IOD with no entry in data_model.iod_specmodels keeps only its placeholder child.
 

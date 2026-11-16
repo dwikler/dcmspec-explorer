@@ -147,6 +147,14 @@ class AppController(QObject):
         """Show the main application window and start the user interface."""
         self.view.show()
 
+    def _is_loading(self) -> bool:
+        """Whether an IOD list or IOD model load is running."""
+        return self.service.is_busy or self.iod_model_service.is_busy
+
+    def _set_check_for_updates_button_state(self) -> None:
+        """Enable Check for Updates only while no IOD list, IOD model or section load is running."""
+        self.view.set_check_for_updates_enabled(not (self._is_loading() or self.section_service.is_busy))
+
     def initialize_treeview(self) -> None:
         """Initialize the treeview with list of IODs.
 
@@ -156,6 +164,7 @@ class AppController(QObject):
 
         # Start the worker in a background thread via the service mediator
         self._treeview_worker, self._treeview_thread = self.service.start_iodlist_worker()
+        self.view.set_loading_controls_enabled(False)
 
         # Connect signals for progress, loaded, and error
         self._connect_iodlist_signals()
@@ -279,17 +288,25 @@ class AppController(QObject):
         self._toggle_favorite(table_id)
 
     def _on_file_menu_about_to_show(self) -> None:
-        """Refresh the Export and favorite items' enabled state to match the currently selected IOD."""
+        """Refresh the Export and favorite items' enabled state to match the currently selected IOD.
+
+        Both items are disabled while an IOD list or IOD model load is running.
+        """
         selected = self.view.get_selected_iod()
         if selected is None:
             self.view.set_export_menu_enabled(False, "Select an IOD first")
             self.view.set_favorite_action(enabled=False, is_favorite=False)
             return
         table_id, _ = selected
+        is_loading = self._is_loading()
         is_loaded = self._is_iod_loaded(table_id)
-        tooltip = "" if is_loaded else "Select this IOD first to load it"
-        self.view.set_export_menu_enabled(is_loaded, tooltip)
-        self.view.set_favorite_action(enabled=True, is_favorite=self.favorites_manager.is_favorite(table_id))
+        # Disable Export while loading to prevent exporting a model that is about to be replaced or discarded.
+        if is_loading:
+            tooltip = "Wait for the load to finish"
+        else:
+            tooltip = "" if is_loaded else "Select this IOD first to load it"
+        self.view.set_export_menu_enabled(is_loaded and not is_loading, tooltip)
+        self.view.set_favorite_action(enabled=not is_loading, is_favorite=self.favorites_manager.is_favorite(table_id))
 
     @staticmethod
     def _normalize_export_filename(name: str) -> str:
@@ -344,6 +361,7 @@ class AppController(QObject):
         self.view.update_status_bar(message="Downloading latest IOD modules from web...")
         # Start the worker in a background thread via the service mediator, forcing download
         self._treeview_worker, self._treeview_thread = self.service.start_iodlist_worker(force_download=True)
+        self.view.set_loading_controls_enabled(False)
         # Connect signals for progress, loaded, and error
         self._connect_iodlist_signals()
 
@@ -456,18 +474,24 @@ class AppController(QObject):
         Used both for a top-level IOD's first load and for an explicit reload triggered from the
         explanatory section drawer (e.g. to pick up section references missing from an older cache).
         """
+        # Ignore the request if a load is already running to prevent concurrent loads.
+        if self._is_loading():
+            self.logger.warning(f"A load is already in progress: not loading IOD {table_id} now.")
+            return
+
+        # Start the IOD model loader worker in a background thread before changing the UI,
+        # to prevent locked UI on failure
+        self._iod_model_worker, self._iod_model_thread = self.iod_model_service.start_iodmodel_worker(
+            table_id, force_rebuild=force_rebuild
+        )
+
         self.view.hide_explanation()
 
         # Update status bar message and display progress dialog
         self.view.update_status_bar(message="Loading IOD specification...")
         self.progress_dialog = LoadIODDialog(self.view)
         self.progress_dialog.show()
-        self.view.ui.iodTreeView.setEnabled(False)
-
-        # Start the IOD model loader worker in a background thread
-        self._iod_model_worker, self._iod_model_thread = self.iod_model_service.start_iodmodel_worker(
-            table_id, force_rebuild=force_rebuild
-        )
+        self.view.set_loading_controls_enabled(False)
 
         # Disconnect previous signal connections to avoid duplicate handlers
         self._safe_disconnect(
@@ -544,13 +568,16 @@ class AppController(QObject):
             self.view.update_status_bar(f"Loading IOD modules... {percent}%")
 
     def _handle_iodlist_loaded(self, sender: object, iod_entry_list: list[IODEntry]) -> None:
+        self.view.set_loading_controls_enabled(True)
+
         # Populate the tree model with the loaded IODs applying filters and sorting
         self.apply_filter_and_sort(iod_entry_list=iod_entry_list)
 
         # After repopulating the treeview, re-add children for IODs by using the loaded SpecModels
         if not self.model.new_version_available:
             model = self.view.ui.iodTreeView.model()
-            for table_id, iod_model in self.model.iod_specmodels.items():
+            # Iterate over a copy, as a worker thread can add an IOD model to the dict meanwhile.
+            for table_id, iod_model in list(self.model.iod_specmodels.items()):
                 if iod_model and hasattr(iod_model, "content") and iod_model.content:
                     self.treeview_adapter.populate_iod_entry_children(model, table_id, iod_model.content)
 
@@ -570,6 +597,7 @@ class AppController(QObject):
             self.view.update_status_bar(message=f"Listed {len(iod_entry_list)} IODs.")
 
     def _handle_iodlist_error(self, sender: object, message: str) -> None:
+        self.view.set_loading_controls_enabled(True)
         self._report_error(sender, message, status_bar_message="Error loading IOD modules.")
 
     def _handle_iodmodel_progress(self, sender: object, progress: Progress) -> None:
@@ -587,20 +615,24 @@ class AppController(QObject):
             self.progress_dialog.update_step(status, percent)
 
     def _handle_iodmodel_loaded(self, sender: object, iod_model: object, table_id: str) -> None:
-        if iod_model and hasattr(iod_model, "content"):
-            # Find the parent item in the current treeview model
-            model = self.view.ui.iodTreeView.model()
-            success = self.treeview_adapter.populate_iod_entry_children(model, table_id, iod_model.content)
-            if not success:
-                self.view.show_error("The selected IOD is no longer visible. Please clear the filter and try again.")
+        # Hide progress dialog and re-enable treeview, whether the loaded model has content or not
+        if hasattr(self, "progress_dialog") and self.progress_dialog:
+            self.progress_dialog.accept()
+            self.progress_dialog = None
+        self.view.set_loading_controls_enabled(True)
 
-            # Hide progress dialog and re-enable treeview
-            if hasattr(self, "progress_dialog") and self.progress_dialog:
-                self.progress_dialog.accept()
-                self.progress_dialog = None
-            self.view.ui.iodTreeView.setEnabled(True)
-            self.view.update_status_bar(message="IOD specification loaded.")
-            self._refresh_selected_attribute_after_load(table_id)
+        if not (iod_model and hasattr(iod_model, "content")):
+            self.logger.error(f"IOD {table_id} was loaded without content.")
+            self.view.update_status_bar(message="Error loading IOD specification.")
+            return
+
+        # Find the parent item in the current treeview model
+        model = self.view.ui.iodTreeView.model()
+        success = self.treeview_adapter.populate_iod_entry_children(model, table_id, iod_model.content)
+        if not success:
+            self.view.show_error("The selected IOD is no longer visible. Please clear the filter and try again.")
+        self.view.update_status_bar(message="IOD specification loaded.")
+        self._refresh_selected_attribute_after_load(table_id)
 
     def _refresh_selected_attribute_after_load(self, table_id: str) -> None:
         """Re-render the currently selected attribute's details after its IOD was (re)loaded.
@@ -621,7 +653,7 @@ class AppController(QObject):
         if hasattr(self, "progress_dialog") and self.progress_dialog:
             self.progress_dialog.reject()
             self.progress_dialog = None
-        self.view.ui.iodTreeView.setEnabled(True)
+        self.view.set_loading_controls_enabled(True)
         self.view.show_error(message)
         self.view.update_status_bar(message="Error loading IOD specification.")
 
@@ -670,9 +702,17 @@ class AppController(QObject):
             self.view.show_explanation()
             return
 
+        # Ignore the request if an IOD list or IOD model load is running to prevent concurrent loads.
+        # The details panel stays clickable during a Check for Updates, as the IOD list load has no modal dialog.
+        if self._is_loading():
+            self.logger.warning(f"A load is already in progress: not loading section {section_id} now.")
+            return
+
         self._explanation_requested_section_id = section_id
         self.view.update_status_bar(message="Loading explanatory section...")
         self._section_worker, self._section_thread = self.section_service.start_section_worker(section_id)
+        # Disable Check for Updates while the section loads, as an update can replace the cache it reads.
+        self._set_check_for_updates_button_state()
 
         self._safe_disconnect(
             self.section_service.section_loaded_signal,
@@ -697,6 +737,7 @@ class AppController(QObject):
         Ignored if the drawer has since moved on to a different section (e.g. the user clicked
         another attribute's reference before this one finished loading).
         """
+        self._set_check_for_updates_button_state()
         if section_id != self._explanation_requested_section_id:
             return
         self._explanation_loaded_section_id = section_id
@@ -712,6 +753,7 @@ class AppController(QObject):
         Ignored if the drawer has since moved on to a different section (e.g. the user clicked
         another attribute's reference before this one failed).
         """
+        self._set_check_for_updates_button_state()
         if section_id != self._explanation_requested_section_id:
             return
         # The worker already logs the actual cause at the right severity (info if this section

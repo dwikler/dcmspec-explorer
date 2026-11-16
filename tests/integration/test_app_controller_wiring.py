@@ -70,6 +70,22 @@ class TestCheckForUpdatesClickedWiring:
 
         assert calls == [True]
 
+    def test_check_for_updates_disables_the_real_button_and_treeview_until_the_list_is_loaded(self, qtbot):
+        """The real window's button and treeview are disabled for the load and enabled again when it ends."""
+        controller = AppController()
+        qtbot.addWidget(controller.view)
+        ui = controller.view.ui
+
+        controller.view.check_for_updates_clicked.emit()
+
+        assert not ui.checkForUpdatesPushButton.isEnabled()
+        assert not ui.iodTreeView.isEnabled()
+
+        controller._handle_iodlist_loaded(sender=object(), iod_entry_list=[])
+
+        assert ui.checkForUpdatesPushButton.isEnabled()
+        assert ui.iodTreeView.isEnabled()
+
 
 class TestSearchTextChangedWiring:
     """Tests that the search box's signal reaches AppController.apply_filter_and_sort."""
