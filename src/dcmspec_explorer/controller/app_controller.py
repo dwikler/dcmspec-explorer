@@ -151,6 +151,10 @@ class AppController(QObject):
         """Whether an IOD list or IOD model load is running."""
         return self.service.is_busy or self.iod_model_service.is_busy
 
+    def _set_check_for_updates_button_state(self) -> None:
+        """Enable Check for Updates only while no IOD list, IOD model or section load is running."""
+        self.view.set_check_for_updates_enabled(not (self._is_loading() or self.section_service.is_busy))
+
     def initialize_treeview(self) -> None:
         """Initialize the treeview with list of IODs.
 
@@ -698,9 +702,17 @@ class AppController(QObject):
             self.view.show_explanation()
             return
 
+        # Ignore the request if an IOD list or IOD model load is running to prevent concurrent loads.
+        # The details panel stays clickable during a Check for Updates, as the IOD list load has no modal dialog.
+        if self._is_loading():
+            self.logger.warning(f"A load is already in progress: not loading section {section_id} now.")
+            return
+
         self._explanation_requested_section_id = section_id
         self.view.update_status_bar(message="Loading explanatory section...")
         self._section_worker, self._section_thread = self.section_service.start_section_worker(section_id)
+        # Disable Check for Updates while the section loads, as an update can replace the cache it reads.
+        self._set_check_for_updates_button_state()
 
         self._safe_disconnect(
             self.section_service.section_loaded_signal,
@@ -725,6 +737,7 @@ class AppController(QObject):
         Ignored if the drawer has since moved on to a different section (e.g. the user clicked
         another attribute's reference before this one finished loading).
         """
+        self._set_check_for_updates_button_state()
         if section_id != self._explanation_requested_section_id:
             return
         self._explanation_loaded_section_id = section_id
@@ -740,6 +753,7 @@ class AppController(QObject):
         Ignored if the drawer has since moved on to a different section (e.g. the user clicked
         another attribute's reference before this one failed).
         """
+        self._set_check_for_updates_button_state()
         if section_id != self._explanation_requested_section_id:
             return
         # The worker already logs the actual cause at the right severity (info if this section

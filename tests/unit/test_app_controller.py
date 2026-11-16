@@ -61,6 +61,7 @@ _BOUND_METHOD_NAMES = [
     "_handle_export_error",
     "_report_error",
     "_is_loading",
+    "_set_check_for_updates_button_state",
     "_on_check_for_updates_clicked",
     "_toggle_favorite",
     "_safe_disconnect",
@@ -260,8 +261,9 @@ class FakeMediator:
         return ("fake_worker", "fake_thread")
 
     def start_section_worker(self, section_id):
-        """Record the call and return a dummy (worker, thread) pair."""
+        """Record the call, become busy as a started worker makes the real mediator, and return a dummy pair."""
         self.start_section_worker_calls.append(section_id)
+        self.is_busy = True
         return ("fake_worker", "fake_thread")
 
 
@@ -400,6 +402,7 @@ class FakeView:
         self._selected_iod = selected_iod
         self.export_menu_enabled_calls = []
         self.loading_controls_calls = []
+        self.check_for_updates_calls = []
         self.favorite_action_calls = []
         self.explanation_html_calls = []
         self.explanation_visible_calls = []
@@ -407,6 +410,10 @@ class FakeView:
     def set_loading_controls_enabled(self, enabled):
         """Record the call."""
         self.loading_controls_calls.append(enabled)
+
+    def set_check_for_updates_enabled(self, enabled):
+        """Record the call."""
+        self.check_for_updates_calls.append(enabled)
 
     def set_details_html(self, html_body):
         """Record the call."""
@@ -2062,6 +2069,28 @@ class TestOnSectionLinkClicked:
         assert view.explanation_visible_calls[-1] is True
         assert view.status_bar_calls == []
 
+    def test_starting_a_load_disables_check_for_updates(self, fake_logger):
+        """Check for Updates is disabled for the section load, as an update can replace the cache it reads."""
+        view = FakeView()
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+
+        state._on_section_link_clicked("sect_C.1")
+
+        assert view.check_for_updates_calls == [False]
+
+    @pytest.mark.parametrize("busy_service", ["service", "iod_model_service"])
+    def test_does_nothing_while_an_iod_list_or_model_load_is_running(self, fake_logger, busy_service):
+        """A click on a section link during an IOD list or IOD model load is ignored."""
+        view = FakeView()
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+        getattr(state, busy_service).is_busy = True
+
+        state._on_section_link_clicked("sect_C.1")
+
+        assert state.section_service.start_section_worker_calls == []
+        assert view.status_bar_calls == []
+        assert view.check_for_updates_calls == []
+
 
 class TestHandleSectionLoaded:
     """Tests for AppController._handle_section_loaded."""
@@ -2083,6 +2112,24 @@ class TestHandleSectionLoaded:
         assert view.explanation_visible_calls[-1] is True
         assert view.status_bar_calls[-1] == ""
         assert state._explanation_loaded_section_id == "sect_C.1"
+
+    @pytest.mark.parametrize("still_busy_service", [None, "section_service", "iod_model_service"])
+    def test_enables_check_for_updates_only_when_no_load_is_running(self, fake_logger, still_busy_service):
+        """Check for Updates is enabled after a section load only if no other load is still running."""
+        view = FakeView()
+        state = make_controller_state(
+            view=view, model=FakeModel(), logger=fake_logger, _explanation_requested_section_id="sect_C.1"
+        )
+        if still_busy_service:
+            getattr(state, still_busy_service).is_busy = True
+        section_model = types.SimpleNamespace(
+            metadata=types.SimpleNamespace(title="Section Title"),
+            content=types.SimpleNamespace(html="<p>Section content</p>"),
+        )
+
+        state._handle_section_loaded(state.section_service, section_model, "sect_C.1")
+
+        assert view.check_for_updates_calls == [still_busy_service is None]
 
     def test_ignores_a_result_for_a_section_no_longer_requested(self, fake_logger):
         """A stale result for a section superseded by a later click is not applied to the drawer."""
@@ -2120,6 +2167,29 @@ class TestHandleSectionError:
         assert view.error_calls == []
         assert view.status_bar_calls[-1] == ""
         assert view.url_warning_calls == [f"{app_controller_module.Model.PART3_XHTML_URL}#sect_C.1"]
+
+    def test_enables_check_for_updates_again(self, fake_logger):
+        """A section load failure ends the load, so Check for Updates is enabled again."""
+        view = FakeView()
+        state = make_controller_state(
+            view=view, model=FakeModel(), logger=fake_logger, _explanation_requested_section_id="sect_C.1"
+        )
+
+        state._handle_section_error(state.section_service, "boom", "sect_C.1")
+
+        assert view.check_for_updates_calls == [True]
+
+    def test_keeps_check_for_updates_disabled_while_the_superseding_section_loads(self, fake_logger):
+        """A superseded result ending while a later section is still loading does not enable Check for Updates."""
+        view = FakeView()
+        state = make_controller_state(
+            view=view, model=FakeModel(), logger=fake_logger, _explanation_requested_section_id="sect_C.2"
+        )
+        state.section_service.is_busy = True
+
+        state._handle_section_error(state.section_service, "boom", "sect_C.1")
+
+        assert view.check_for_updates_calls == [False]
 
     def test_ignores_an_error_for_a_section_no_longer_requested(self, fake_logger):
         """A stale error for a section superseded by a later click is not applied to the drawer."""

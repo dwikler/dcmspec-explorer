@@ -411,6 +411,10 @@ class MainWindow(QMainWindow):
         self.ui.iodTreeView.setEnabled(enabled)
         self.ui.checkForUpdatesPushButton.setEnabled(enabled)
 
+    def set_check_for_updates_enabled(self, enabled: bool) -> None:
+        """Enable or disable the Check for Updates button."""
+        self.ui.checkForUpdatesPushButton.setEnabled(enabled)
+
     def set_favorite_action(self, enabled: bool, is_favorite: bool) -> None:
         """Enable or disable the File > favorite action and set its label to match the current favorite state."""
         self.ui.actionToggleFavorite.setEnabled(enabled)
