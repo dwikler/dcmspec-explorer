@@ -610,20 +610,24 @@ class AppController(QObject):
             self.progress_dialog.update_step(status, percent)
 
     def _handle_iodmodel_loaded(self, sender: object, iod_model: object, table_id: str) -> None:
-        if iod_model and hasattr(iod_model, "content"):
-            # Find the parent item in the current treeview model
-            model = self.view.ui.iodTreeView.model()
-            success = self.treeview_adapter.populate_iod_entry_children(model, table_id, iod_model.content)
-            if not success:
-                self.view.show_error("The selected IOD is no longer visible. Please clear the filter and try again.")
+        # Hide progress dialog and re-enable treeview, whether the loaded model has content or not
+        if hasattr(self, "progress_dialog") and self.progress_dialog:
+            self.progress_dialog.accept()
+            self.progress_dialog = None
+        self.view.set_loading_controls_enabled(True)
 
-            # Hide progress dialog and re-enable treeview
-            if hasattr(self, "progress_dialog") and self.progress_dialog:
-                self.progress_dialog.accept()
-                self.progress_dialog = None
-            self.view.set_loading_controls_enabled(True)
-            self.view.update_status_bar(message="IOD specification loaded.")
-            self._refresh_selected_attribute_after_load(table_id)
+        if not (iod_model and hasattr(iod_model, "content")):
+            self.logger.error(f"IOD {table_id} was loaded without content.")
+            self.view.update_status_bar(message="Error loading IOD specification.")
+            return
+
+        # Find the parent item in the current treeview model
+        model = self.view.ui.iodTreeView.model()
+        success = self.treeview_adapter.populate_iod_entry_children(model, table_id, iod_model.content)
+        if not success:
+            self.view.show_error("The selected IOD is no longer visible. Please clear the filter and try again.")
+        self.view.update_status_bar(message="IOD specification loaded.")
+        self._refresh_selected_attribute_after_load(table_id)
 
     def _refresh_selected_attribute_after_load(self, table_id: str) -> None:
         """Re-render the currently selected attribute's details after its IOD was (re)loaded.

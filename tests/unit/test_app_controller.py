@@ -1816,14 +1816,19 @@ class TestHandleIodmodelLoaded:
 
         assert view.error_calls == ["The selected IOD is no longer visible. Please clear the filter and try again."]
 
-    def test_no_content_attribute_does_nothing(self, fake_logger):
-        """An iod_model with no .content attribute is entirely ignored."""
+    @pytest.mark.parametrize("iod_model", [object(), None])
+    def test_result_without_content_hides_dialog_and_reenables_treeview(self, fake_logger, iod_model):
+        """A loaded result without content still ends the load: the dialog is hidden and the controls re-enabled."""
         view = FakeView()
-        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger)
+        dialog = FakeLoadIODDialog(parent=None)
+        state = make_controller_state(view=view, model=FakeModel(), logger=fake_logger, progress_dialog=dialog)
 
-        state._handle_iodmodel_loaded(sender=object(), iod_model=object(), table_id="table_A.1-1")
+        state._handle_iodmodel_loaded(sender=object(), iod_model=iod_model, table_id="table_A.1-1")
 
-        assert view.status_bar_calls == []
+        assert dialog.accepted is True
+        assert state.progress_dialog is None
+        assert view.loading_controls_calls == [True]
+        assert view.status_bar_calls[-1] == "Error loading IOD specification."
 
     def test_refreshes_currently_selected_attribute_of_the_reloaded_iod(self, fake_logger):
         """A reload of the IOD whose attribute is currently selected re-renders its details.
